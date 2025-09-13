@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: glrchain-backend
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+      - key: SECRET_KEY
+      - key: ANCHOR_RPC_URL
+      - key: IPFS_PINATA_KEY
+      - key: IPFS_PINATA_SECRET
