@@ -1,37 +1,35 @@
 import os
 import logging
-from fastapi import FastAPI, Depends
-from sqlalchemy import create_engine, text
+from fastapi import FastAPI, Depends, UploadFile, File
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
 from pydantic import BaseModel
 from cryptography.fernet import Fernet
+import aiofiles
 
 # ======================================================
-#  CONFIG
+# CONFIG
 # ======================================================
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./glrchain.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./glrchain.db")
 SECRET_KEY = os.getenv("SECRET_KEY", Fernet.generate_key().decode())
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+engine = create_async_engine(DATABASE_URL, echo=False, future=True)
+AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 cipher = Fernet(SECRET_KEY.encode() if isinstance(SECRET_KEY, str) else SECRET_KEY)
 
-# Logging setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("glrchain")
 
-# ======================================================
-#  FASTAPI INIT
-# ======================================================
 app = FastAPI(
     title="GLRChain Backend",
-    description="Backend API for GLRChain - Ghana Lands & Natural Resources",
+    description="Backend API for GLRChain - Fighting galamsey with AI, Blockchain, and Encryption",
     version="1.0.0"
 )
 
 # ======================================================
-#  MODELS
+# MODELS
 # ======================================================
 class Report(BaseModel):
     reporter: str
@@ -39,34 +37,34 @@ class Report(BaseModel):
     description: str
 
 # ======================================================
-#  DEPENDENCY
+# DEPENDENCIES
 # ======================================================
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+async def get_db():
+    async with AsyncSessionLocal() as session:
+        yield session
 
 # ======================================================
-#  ROUTES
+# ROUTES
 # ======================================================
 @app.get("/")
-def home():
-    return {"status": "GLRChain backend running 🚀", "mission": "Protect Ghana’s lands & fight illegal mining (galamsey)"}
+async def home():
+    return {
+        "status": "GLRChain backend running 🚀",
+        "mission": "Protect Ghana’s lands & fight illegal mining (galamsey)"
+    }
 
 @app.get("/health")
-def health():
+async def health():
     try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
         return {"database": "ok", "status": "healthy"}
     except Exception as e:
         logger.error(f"DB check failed: {e}")
         return {"database": "error", "status": "unhealthy"}
 
 @app.post("/report")
-def report_case(report: Report, db=Depends(get_db)):
+async def report_case(report: Report, db: AsyncSession = Depends(get_db)):
     """
     Citizens or field officers can report illegal mining activities.
     Data is encrypted for security.
@@ -74,21 +72,32 @@ def report_case(report: Report, db=Depends(get_db)):
     encrypted_desc = cipher.encrypt(report.description.encode()).decode()
     logger.info(f"Encrypted galamsey report from {report.reporter} at {report.location}")
 
-    # Store to DB (later replace with proper ORM model)
-    with engine.connect() as conn:
-        conn.execute(
-            text("CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, reporter TEXT, location TEXT, description TEXT)")
-        )
-        conn.execute(
-            text("INSERT INTO reports (reporter, location, description) VALUES (:r, :l, :d)"),
-            {"r": report.reporter, "l": report.location, "d": encrypted_desc}
-        )
-        conn.commit()
+    await db.execute(
+        text("CREATE TABLE IF NOT EXISTS reports (id SERIAL PRIMARY KEY, reporter TEXT, location TEXT, description TEXT)")
+    )
+    await db.execute(
+        text("INSERT INTO reports (reporter, location, description) VALUES (:r, :l, :d)"),
+        {"r": report.reporter, "l": report.location, "d": encrypted_desc}
+    )
+    await db.commit()
 
     return {"message": "Report received ✅ Encrypted and stored securely."}
 
+@app.post("/upload-evidence")
+async def upload_evidence(file: UploadFile = File(...)):
+    """
+    Upload satellite image, drone footage, or field photo as evidence.
+    """
+    save_path = f"evidence/{file.filename}"
+    os.makedirs("evidence", exist_ok=True)
+    async with aiofiles.open(save_path, "wb") as out_file:
+        content = await file.read()
+        await out_file.write(content)
+
+    return {"message": f"Evidence file {file.filename} uploaded successfully ✅"}
+
 @app.get("/intel")
-def get_intel():
+async def get_intel():
     """
     AI / Algorithm stub for detecting suspicious mining activity.
     Future: connect ML models, satellite feeds, drones, etc.
