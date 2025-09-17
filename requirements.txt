@@ -20,3 +20,4 @@ albumentations
 torchvision
 celery
 redis
+alembic
