@@ -5,3 +5,4 @@ torch>=2.3
 torchvision
 segmentation-models-pytorch
 albumentations
+scipy>=1.11,<2.0
