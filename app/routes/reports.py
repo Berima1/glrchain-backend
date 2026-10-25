@@ -13,6 +13,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit import append_audit_event
 from app.database import get_db
 from app.models import EvidenceRecord, Report, User
 from app.routes.auth import get_current_user
@@ -150,6 +151,15 @@ async def create_report(
     )
     db.add(record)
     try:
+        await db.flush()
+        await append_audit_event(
+            db,
+            actor_user_id=current_user.id,
+            action="report.created",
+            object_type="report",
+            object_id=str(record.id),
+            details={"status": "submitted"},
+        )
         await db.commit()
     except Exception:
         await db.rollback()
@@ -173,6 +183,15 @@ async def list_reports(
     if current_user.role not in PRIVILEGED_ROLES:
         query = query.where(Report.user_id == current_user.id)
     records = (await db.scalars(query.offset(offset).limit(limit))).all()
+    await append_audit_event(
+        db,
+        actor_user_id=current_user.id,
+        action="reports.listed",
+        object_type="report_collection",
+        object_id="collection",
+        details={"limit": limit, "offset": offset, "result_count": len(records)},
+    )
+    await db.commit()
     return [_report_response(record) for record in records]
 
 
@@ -183,6 +202,15 @@ async def read_report(
     current_user: User = Depends(get_current_user),
 ):
     record = await _load_accessible_report(report_id, current_user, db)
+    await append_audit_event(
+        db,
+        actor_user_id=current_user.id,
+        action="report.read",
+        object_type="report",
+        object_id=str(record.id),
+        details={},
+    )
+    await db.commit()
     return _report_response(record)
 
 
@@ -248,6 +276,20 @@ async def upload_evidence(
     )
     db.add(record)
     try:
+        await db.flush()
+        await append_audit_event(
+            db,
+            actor_user_id=current_user.id,
+            action="evidence.uploaded",
+            object_type="evidence",
+            object_id=evidence_id,
+            details={
+                "report_id": report.id,
+                "sha256": digest,
+                "size_bytes": len(data),
+                "content_type": detected_type,
+            },
+        )
         await db.commit()
         await db.refresh(record)
     except Exception:
@@ -273,7 +315,16 @@ async def read_evidence_metadata(
     evidence = await db.scalar(select(EvidenceRecord).where(EvidenceRecord.id == evidence_id))
     if evidence is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence not found.")
-    report = await _load_accessible_report(evidence.report_id, current_user, db)
+    await _load_accessible_report(evidence.report_id, current_user, db)
+    await append_audit_event(
+        db,
+        actor_user_id=current_user.id,
+        action="evidence.metadata_read",
+        object_type="evidence",
+        object_id=evidence.id,
+        details={"report_id": evidence.report_id},
+    )
+    await db.commit()
     return evidence
 
 
@@ -302,6 +353,16 @@ async def download_evidence(
     if not hmac.compare_digest(actual_digest, evidence.sha256):
         logger.critical("Evidence integrity check failed for evidence id=%s.", evidence_id)
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Evidence integrity verification failed.")
+
+    await append_audit_event(
+        db,
+        actor_user_id=current_user.id,
+        action="evidence.downloaded",
+        object_type="evidence",
+        object_id=evidence.id,
+        details={"report_id": evidence.report_id, "sha256": actual_digest},
+    )
+    await db.commit()
 
     # Always send evidence as an attachment; do not render user-supplied content inline.
     return Response(
