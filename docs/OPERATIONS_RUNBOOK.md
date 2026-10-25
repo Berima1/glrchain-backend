@@ -1,76 +1,86 @@
-# Operations Runbook
+# GLRChain Operations Runbook
 
-This runbook is for the controlled engineering environment. It is not a substitute for a signed institutional operating procedure.
+**Status:** baseline runbook to adapt and test before staging/production.
 
-## Health and readiness
+## 1. Health checks
 
-- `GET /health/live` checks that the process responds.
-- `GET /health/ready` checks database connectivity.
-- Neither endpoint proves Firebase, evidence storage, audit export, satellite processing, or blockchain integrations work.
+- Liveness endpoint: confirms the application process responds; it does not prove database or storage availability.
+- Readiness endpoint: should verify the required database dependency and return a non-ready status when unavailable.
+- Evidence-storage readiness: must be monitored separately; do not claim evidence upload is ready based only on API liveness.
+- Monitor HTTP error rate, authentication failures, database connection pool exhaustion, migration failures, storage errors, processing queue depth, job age, and alert/review backlog.
 
-Monitor request failures, database connection errors, failed migrations, evidence upload/cleanup failures, report decryption errors, audit verification failures, unusual authentication failures and deployment changes. Do not include tokens, secret values, report descriptions or raw sensitive evidence in logs.
+Use the deployed environment's actual endpoint paths and verify them against the release commit before configuring probes.
 
-## Initial administrator bootstrap
+## 2. Deployment
 
-The command `python -m app.commands.bootstrap_admin USERNAME FIREBASE_UID` is intended only for the initial controlled Firebase-backed admin profile after migrations.
+1. Confirm the approved PR, commit SHA and green required checks.
+2. Confirm the target is staging or production and that secrets are set through the secret manager.
+3. Verify database backup status and migration plan.
+4. Build once and deploy the same immutable image digest that was tested.
+5. Run migrations as a controlled release step.
+6. Run smoke tests with synthetic accounts and files.
+7. Check logs/metrics and confirm no sensitive values are emitted.
+8. Record deployment time, image digest, commit SHA, operator and outcome.
 
-Required environment conditions:
-- `APP_ENV=production`
-- `GLRCHAIN_ALLOW_INITIAL_ADMIN_BOOTSTRAP=true` for one operation only
-- `FIREBASE_PROJECT_ID` for the intended Firebase project
-- `GLRCHAIN_INITIAL_ADMIN_USERNAME` set to the exact pre-approved unused username
-- `GLRCHAIN_INITIAL_ADMIN_FIREBASE_UID` set to the separately approved Firebase UID
-- authorised Application Default Credentials for the one-time administrative command, including permission to look up the Firebase user
-- configured database connection, audit tables, and dependencies installed
+## 3. Evidence upload failure
 
-The command verifies that the Firebase user exists and has a verified email, refuses if an administrator already exists or the user/username is already mapped, assigns the Firebase UID, and records an audit event. After success, immediately remove/disable the bootstrap flag and one-time UID variable. Do not grant the API runtime identity Firebase user-administration privileges just for bootstrap. This is not a day-to-day account management process; routine admin/validator assignment needs a separately reviewed workflow.
+If private object storage is unavailable:
+- Stop accepting evidence uploads; do not silently write to local ephemeral disk.
+- Preserve the report metadata only if the API contract explicitly supports that partial state; otherwise fail the request and report a safe error.
+- Do not return a fake storage object ID or success response.
+- Check runtime identity, IAM, bucket configuration, network access, quota and cloud audit logs.
+- Retry only idempotently; do not create duplicate evidence records.
+- Record incident ID and recovery actions without copying evidence content into logs.
 
-Production uses Firebase Authentication for sign-in. A Firebase user is not an administrator merely because their client token is valid; profile role is stored in PostgreSQL and public provisioning assigns `user` only.
+## 4. Database incident
 
-## Release process
+- Treat connection failures, migration mismatch or unexpected schema as an incident.
+- Do not delete tables or rerun destructive migrations to restore service.
+- Preserve logs and database diagnostics while redacting credentials and report content.
+- Restore from backup only under an approved recovery plan and record the recovery point.
+- After restore, verify schema version, report counts and sample integrity using authorized procedures.
 
-1. Create/update a feature branch and PR.
-2. Inspect the complete diff and documentation.
-3. Run CI on the final exact commit and resolve every failure.
-4. Review migration SQL and rehearse against a disposable copy with a backup.
-5. Confirm production secret versions, identity policies, bucket access, DB roles, backup configuration and monitoring.
-6. Use the protected, manual Cloud Run workflow only for approved code on `main`.
-7. The workflow builds an immutable commit-tagged image, applies the Alembic migration through a Cloud Run Job, and deploys the API service.
-8. Verify revision, `/health/live`, `/health/ready`, authenticated report creation/read, private evidence transfer and audit verification in the approved staging environment.
-9. Record the release evidence in the release register and retain the preceding deployable image/revision.
+## 5. Secret/key incident
 
-## Incident: report description cannot be decrypted
+- Revoke compromised identity or secret.
+- Determine which tokens or encrypted records may be affected.
+- Rotate through the approved key lifecycle procedure; do not replace the encryption key blindly because existing encrypted values may become unreadable.
+- Preserve relevant audit logs, investigate access and document the incident.
+- Validate the recovery procedure in staging before using it in production.
 
-1. Stop intake of sensitive reports if data readability is at risk.
-2. Preserve logs and database backup/snapshot before changing keys.
-3. Identify `encryption_key_version` and the exact historical key version required.
-4. Check Secret Manager version/reference without printing the key.
-5. Test decryption on an isolated restored copy.
-6. Do not generate a replacement key and assume old data will remain readable.
-7. Document the cause, scope and recovery, then follow formal key-rotation requirements.
+## 6. Suspected evidence-integrity incident
 
-## Incident: evidence hash mismatch or inaccessible object
+- Restrict access to the affected case without destroying data.
+- Preserve original object versions, recorded digests, timestamps and access events.
+- Recompute the SHA-256 digest and compare with the trusted recorded value.
+- Document who performed verification, when, which bytes/object version was checked, and the result.
+- Do not treat a mismatch as proof of malicious activity until storage/versioning and processing history are examined.
 
-1. Do not return the file as verified.
-2. Record the evidence ID, stored digest, computed digest and relevant object generation metadata without logging the file body.
-3. Preserve the object and database records; do not overwrite the evidence in place.
-4. Check bucket IAM, object version/generation, lifecycle/retention changes and upload/cleanup logs.
-5. Verify against a known-good backup/version and escalate to an authorised reviewer.
-6. A corrected evidence item must be stored as a new version/record with provenance, not silently substituted.
+## 7. Satellite pipeline incident (future capability)
 
-## Incident: audit chain fails verification
+- Pause alert publication if source data, georeferencing, model version or provenance is missing.
+- Retain source scenes and processing logs; do not substitute fabricated or stale imagery.
+- Mark affected candidate alerts as under review and notify authorized reviewers.
+- Resume only after the issue is understood, reprocessing is reproducible, and the responsible reviewer approves.
 
-1. Treat the integrity alarm as material; preserve a database snapshot and export current audit events.
-2. Restrict further administrative changes pending review, without destroying records.
-3. Verify the external audit export/retention sink, not only the live database.
-4. Compare the first invalid sequence and surrounding events with database/cloud audit logs.
-5. Never rebuild the chain to make it look valid before the incident is investigated.
-6. Record the independent reviewer, findings, evidence hashes and disposition.
+## 8. Rollback
 
-## Recovery and backup
+- Roll back application code to the last known-good image if needed.
+- Avoid destructive database rollback; use backward-compatible schema migrations and a separately reviewed data-recovery plan.
+- Verify health, authentication, report ownership checks and evidence access after rollback.
+- Record the trigger, affected versions, operator, time, impact and follow-up actions.
 
-- Enable Cloud SQL automated backups and point-in-time recovery according to the approved RPO/RTO.
-- Test a restore into an isolated instance regularly; a successful backup job alone is not a restore test.
-- Keep evidence retention/versioning aligned with legal policy and cost controls.
-- Ensure migration identity and application runtime identity are separate.
-- Reconcile orphaned GCS objects and dangling metadata via a documented, dry-run-first maintenance job.
+## 9. Incident record template
+
+- Incident ID:
+- Start/end time (UTC):
+- Environment and commit/image:
+- Reporter and incident lead:
+- Impacted component/data scope:
+- Detection method:
+- Containment and recovery steps:
+- Evidence/log references:
+- Root cause and contributing factors:
+- User/agency notification decision:
+- Corrective actions, owner and due date:
+- Review/sign-off:
