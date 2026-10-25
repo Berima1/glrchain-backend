@@ -9,7 +9,7 @@ GLRChain is intended to support auditable land and natural-resource reporting, p
 - PostgreSQL-backed users, reports, evidence metadata and schema migrations.
 - Local username/password mode for controlled development and automated tests.
 - A production path for server-side Firebase ID-token verification and profile provisioning. Public provisioning assigns only the normal `user` role.
-- Report description encryption with explicit key versions to preserve compatibility with legacy records.
+- New report descriptions and locations are encrypted with explicit key versions; legacy plaintext locations and legacy encrypted descriptions are versioned separately for backward-compatible migration.
 - Private Google Cloud Storage upload/download code, size and file-signature checks, SHA-256 recording and verification.
 - Transactional, hash-chained application audit events for key report/evidence/account operations, plus privileged chain verification.
 - Real database-backed admin statistics.
