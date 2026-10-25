@@ -32,7 +32,7 @@
 - Server-side profile lookup: current role comes from PostgreSQL, not from client-supplied role fields.
 - Public registration and Firebase provisioning assign only `user`.
 - Report owner scoping; admin/validator exceptions are explicit in current routes.
-- Report description encryption with explicit encryption-key version.
+- Report description and new report location encryption with explicit encryption-key versions; legacy plaintext locations are explicitly marked as version 0.
 - Private GCS interface with size/type checks, create-only object writes, SHA-256 metadata and digest check on download.
 - Attachment response headers (`no-store`, `nosniff`) for evidence downloads.
 - Transactional audit events and a hash-chain verification endpoint.
