@@ -14,7 +14,8 @@ from app.models import User
 from app.schemas import Token, UserCreate, UserLogin, UserOut
 
 router = APIRouter()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["argon2", "bcrypt"], deprecated="auto")
+DUMMY_PASSWORD_HASH = pwd_context.hash("glrchain-login-timing-only-not-a-user-password")
 bearer_scheme = HTTPBearer(auto_error=False)
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
@@ -67,12 +68,23 @@ async def register(user_input: UserCreate, db: AsyncSession = Depends(get_db)):
 @router.post("/login", response_model=Token)
 async def login(user_input: UserLogin, db: AsyncSession = Depends(get_db)):
     user = await db.scalar(select(User).where(User.username == user_input.username))
-    if user is None or not pwd_context.verify(user_input.password, user.hashed_password):
+    stored_hash = user.hashed_password if user is not None else DUMMY_PASSWORD_HASH
+    try:
+        verified, replacement_hash = pwd_context.verify_and_update(user_input.password, stored_hash)
+    except (TypeError, ValueError):
+        verified, replacement_hash = False, None
+
+    if user is None or not verified:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Successful logins upgrade historical bcrypt hashes to Argon2id.
+    if replacement_hash:
+        user.hashed_password = replacement_hash
+        await db.commit()
 
     token = create_access_token(user)
     return Token(
