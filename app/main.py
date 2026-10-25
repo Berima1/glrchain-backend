@@ -34,6 +34,11 @@ def validate_production_configuration() -> None:
     if not os.getenv("GLRCHAIN_EVIDENCE_BUCKET"):
         raise RuntimeError("Production requires GLRCHAIN_EVIDENCE_BUCKET for private evidence storage.")
 
+    if os.getenv("GLRCHAIN_AUTH_PROVIDER", "").strip().lower() != "firebase":
+        raise RuntimeError("Production requires GLRCHAIN_AUTH_PROVIDER=firebase; local password auth is for controlled development only.")
+    if not os.getenv("FIREBASE_PROJECT_ID"):
+        raise RuntimeError("Production requires FIREBASE_PROJECT_ID for Firebase ID-token verification.")
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
