@@ -316,3 +316,26 @@ def test_z_audit_chain_detects_modified_event_data(client: TestClient) -> None:
     assert after.status_code == 200
     assert after.json()["valid"] is False
     assert after.json()["reason"] == "hash_or_link_mismatch"
+
+
+def test_cors_allows_configured_frontend_and_rejects_unknown_origin(client: TestClient) -> None:
+    allowed = client.options(
+        "/reports",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    assert allowed.status_code == 200, allowed.text
+    assert allowed.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+    denied = client.options(
+        "/reports",
+        headers={
+            "Origin": "https://unapproved.example.invalid",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    assert "access-control-allow-origin" not in denied.headers
