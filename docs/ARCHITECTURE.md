@@ -50,3 +50,8 @@ Current repository stubs for NBR/SAR/U-Net and fake score/transaction endpoints 
 Use separate service identities for (a) API runtime, (b) database migration job, (c) geospatial processing job, and (d) GitHub Actions deployment. Limit database migration privileges to the migration identity; grant the runtime identity only its required DML access. Grant Cloud Storage access at the evidence bucket level, not project-wide where avoidable.
 
 Keep Cloud Run, Cloud SQL, and the bucket in locations approved by the project's data-protection and operational requirements. Verify service availability, data-residency obligations, and cost before selecting a production region.
+
+
+## Historical data boundary
+
+The audit chain starts when the audit schema and application logging are introduced. Legacy report rows do not acquire authentic historical audit events retroactively. If an earlier deployment is migrated, record a clearly labelled baseline/import event and manifest digest; keep the historical gap explicit. The detailed procedure is in [Legacy Data Migration](LEGACY_DATA_MIGRATION.md).
