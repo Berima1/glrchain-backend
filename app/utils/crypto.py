@@ -1,7 +1,8 @@
 """AES-GCM helpers — production must use KMS"""
+import base64
+
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
-import base64
 
 def encrypt_bytes(key: bytes, plaintext: bytes):
     iv = get_random_bytes(12)
