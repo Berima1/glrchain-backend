@@ -12,15 +12,18 @@ Monitor request failures, database connection errors, failed migrations, evidenc
 
 ## Initial administrator bootstrap
 
-The command `python -m app.commands.bootstrap_admin USERNAME` is intended only for the initial controlled admin profile after migrations.
+The command `python -m app.commands.bootstrap_admin USERNAME FIREBASE_UID` is intended only for the initial controlled Firebase-backed admin profile after migrations.
 
 Required environment conditions:
 - `APP_ENV=production`
 - `GLRCHAIN_ALLOW_INITIAL_ADMIN_BOOTSTRAP=true` for one operation only
+- `FIREBASE_PROJECT_ID` for the intended Firebase project
 - `GLRCHAIN_INITIAL_ADMIN_USERNAME` set to the exact pre-approved unused username
+- `GLRCHAIN_INITIAL_ADMIN_FIREBASE_UID` set to the separately approved Firebase UID
+- authorised Application Default Credentials for the one-time administrative command, including permission to look up the Firebase user
 - configured database connection, audit tables, and dependencies installed
 
-The command prompts for a password without echoing it, requires at least 16 characters, refuses if an administrator already exists, and records an audit event. After successful creation, immediately remove/disable the bootstrap environment flag. Never send the password through GitHub, chat, logs, or command history. This is not a day-to-day account management process; routine admin/validator assignment needs a separately reviewed workflow.
+The command verifies that the Firebase user exists and has a verified email, refuses if an administrator already exists or the user/username is already mapped, assigns the Firebase UID, and records an audit event. After success, immediately remove/disable the bootstrap flag and one-time UID variable. Do not grant the API runtime identity Firebase user-administration privileges just for bootstrap. This is not a day-to-day account management process; routine admin/validator assignment needs a separately reviewed workflow.
 
 Production uses Firebase Authentication for sign-in. A Firebase user is not an administrator merely because their client token is valid; profile role is stored in PostgreSQL and public provisioning assigns `user` only.
 
