@@ -57,6 +57,9 @@ jobs:
       - name: Compile application
         run: python -m compileall -q app
 
+      - name: Lint application and tests
+        run: ruff check app tests
+
       - name: Apply migrations against PostGIS/PostgreSQL
         run: alembic upgrade head
 
