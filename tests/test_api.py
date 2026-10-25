@@ -45,6 +45,43 @@ def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _set_database_role(username: str, role: str) -> None:
+    url = os.environ["DATABASE_URL"]
+    if url.startswith("sqlite+aiosqlite:///"):
+        path = url.split("sqlite+aiosqlite:///", 1)[1]
+        with sqlite3.connect(path) as connection:
+            connection.execute("UPDATE users SET role = ? WHERE username = ?", (role, username))
+    else:
+        import psycopg2
+
+        sync_url = url.replace("postgresql+asyncpg://", "postgresql://", 1)
+        with psycopg2.connect(sync_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("UPDATE users SET role = %s WHERE username = %s", (role, username))
+
+
+def _tamper_first_audit_event() -> None:
+    url = os.environ["DATABASE_URL"]
+    if url.startswith("sqlite+aiosqlite:///"):
+        path = url.split("sqlite+aiosqlite:///", 1)[1]
+        with sqlite3.connect(path) as connection:
+            connection.execute(
+                "UPDATE audit_events SET details_json = '{\"tampered\":true}' "
+                "WHERE sequence = (SELECT MIN(sequence) FROM audit_events)"
+            )
+    else:
+        import psycopg2
+
+        sync_url = url.replace("postgresql+asyncpg://", "postgresql://", 1)
+        with psycopg2.connect(sync_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE audit_events SET details_json = %s "
+                    "WHERE sequence = (SELECT MIN(sequence) FROM audit_events)",
+                    ('{"tampered":true}',),
+                )
+
+
 def _stored_description(report_id: int) -> tuple[str, int]:
     url = os.environ["DATABASE_URL"]
     if url.startswith("sqlite+aiosqlite:///"):
@@ -226,3 +263,48 @@ def test_private_evidence_upload_and_download_verify_sha256(
         f"/evidence/{evidence['id']}/content", headers=_headers(other_token)
     )
     assert denied.status_code == 404
+
+
+def test_audit_chain_is_verified_and_visible_only_to_privileged_users(client: TestClient) -> None:
+    username, token = _create_account(client)
+    report_response = client.post(
+        "/reports",
+        headers=_headers(token),
+        json={
+            "location": "Asuogyaman District, Ghana",
+            "description": "Record this report action in the audit chain for a CI verification.",
+        },
+    )
+    assert report_response.status_code == 201, report_response.text
+
+    assert client.get("/admin/audit/verify", headers=_headers(token)).status_code == 403
+    _set_database_role(username, "admin")
+    admin_headers = _headers(token)
+
+    verification = client.get("/admin/audit/verify", headers=admin_headers)
+    assert verification.status_code == 200, verification.text
+    assert verification.json()["valid"] is True
+    assert verification.json()["events_checked"] >= 3
+
+    events = client.get("/admin/audit/events", headers=admin_headers)
+    assert events.status_code == 200
+    actions = [event["action"] for event in events.json()["events"]]
+    assert "user.registered" in actions
+    assert "auth.login_succeeded" in actions
+    assert "report.created" in actions
+
+
+def test_z_audit_chain_detects_modified_event_data(client: TestClient) -> None:
+    username, token = _create_account(client)
+    _set_database_role(username, "admin")
+    headers = _headers(token)
+
+    before = client.get("/admin/audit/verify", headers=headers)
+    assert before.status_code == 200
+    assert before.json()["valid"] is True
+
+    _tamper_first_audit_event()
+    after = client.get("/admin/audit/verify", headers=headers)
+    assert after.status_code == 200
+    assert after.json()["valid"] is False
+    assert after.json()["reason"] == "hash_or_link_mismatch"
