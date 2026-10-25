@@ -8,7 +8,7 @@ The repository workflow `.github/workflows/ci.yml` is designed to:
 2. Compile the application modules.
 3. Apply Alembic migrations to a fresh PostgreSQL/PostGIS service database.
 4. Run automated API security, persistence and evidence/audit tests.
-5. Build the API container.
+5. Build the API container.\n6. Test the offline Sentinel-2 processor with synthetic, georeferenced GeoTIFF stacks.
 
 The initial API foundation achieved a successful CI run at commit `eb4862dad3e0969fc1eeb93231adeb8e027d283b` with eight tests passing and the image build complete. Additional audit-chain, Firebase identity and migration changes were added after that commit; they require their own current successful CI run before they can be treated as verified. Always use the latest result for the exact commit SHA rather than relying on an earlier green run.
 
@@ -20,7 +20,7 @@ The initial API foundation achieved a successful CI run at commit `eb4862dad3e09
 - Password hash verification and legacy hash upgrade.
 - Report encryption key version behaviour.
 - SHA-256 calculation, evidence type signature checks, filename sanitisation.
-- Canonical audit payload serialization and hash recomputation.
+- Canonical audit payload serialization and hash recomputation.\n- Sentinel-2 L2A band/metadata validation, band-specific radiometric offsets, SCL masking, NDVI/BSI/NBR signal combination, grid mismatch rejection, connected-component area filtering, WGS84 GeoJSON output, and SHA-256 manifests using synthetic raster fixtures.
 
 ### API tests
 
@@ -57,7 +57,7 @@ Use a labelled Ghana-specific reference set and a written validation protocol. R
 
 ## How to reproduce locally
 
-Install dependencies with `pip install -r requirements-dev.txt`, set a test database URL and test-only keys, then run:
+Install dependencies with `pip install -r requirements-dev.txt` (includes NumPy, Rasterio and SciPy for the EO tests), set a test database URL and test-only keys, then run:
 
 ```bash
 python -m compileall -q app
