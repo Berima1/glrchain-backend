@@ -1,3 +1,4 @@
+import hashlib
 import os
 import sqlite3
 from uuid import uuid4
@@ -159,3 +160,69 @@ def test_database_url_configuration_fails_closed_in_production() -> None:
     assert database_url_from_env({"APP_ENV": "test"}).startswith("sqlite+aiosqlite:///")
     assert normalize_database_url("postgres://user:pass@host/db").startswith("postgresql+asyncpg://")
     assert normalize_database_url("postgresql://user:pass@host/db").startswith("postgresql+asyncpg://")
+
+
+def test_private_evidence_upload_and_download_verify_sha256(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.routes import reports as reports_routes
+
+    _, token = _create_account(client)
+    headers = _headers(token)
+    monkeypatch.setenv("GLRCHAIN_EVIDENCE_BUCKET", "glrchain-ci-private-test-bucket")
+
+    report_response = client.post(
+        "/reports",
+        headers=headers,
+        json={
+            "location": "Asuogyaman District, Ghana",
+            "description": "A sufficiently detailed report to attach evidence during CI testing.",
+        },
+    )
+    assert report_response.status_code == 201, report_response.text
+    report_id = report_response.json()["id"]
+
+    evidence_bytes = b"\\xff\\xd8\\xff" + b"glrchain-image-test-bytes"
+    captured: dict[str, object] = {}
+
+    def fake_upload(bucket, object_name, data, content_type, metadata):
+        captured["bucket"] = bucket
+        captured["object_name"] = object_name
+        captured["data"] = data
+        captured["content_type"] = content_type
+        captured["metadata"] = metadata
+        return 123
+
+    def fake_download(bucket, object_name):
+        assert bucket == "glrchain-ci-private-test-bucket"
+        assert object_name == captured["object_name"]
+        return evidence_bytes
+
+    monkeypatch.setattr(reports_routes, "_upload_gcs", fake_upload)
+    monkeypatch.setattr(reports_routes, "_download_gcs", fake_download)
+
+    uploaded = client.post(
+        "/evidence",
+        headers=headers,
+        data={"report_id": str(report_id)},
+        files={"file": ("field-photo.jpg", evidence_bytes, "image/jpeg")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    evidence = uploaded.json()
+    assert evidence["report_id"] == report_id
+    assert evidence["sha256"] == hashlib.sha256(evidence_bytes).hexdigest()
+    assert evidence["size_bytes"] == len(evidence_bytes)
+    assert captured["content_type"] == "image/jpeg"
+    assert captured["metadata"]["sha256"] == evidence["sha256"]
+
+    download = client.get(f"/evidence/{evidence['id']}/content", headers=headers)
+    assert download.status_code == 200
+    assert download.content == evidence_bytes
+    assert download.headers["x-content-type-options"] == "nosniff"
+    assert download.headers["cache-control"] == "private, no-store"
+
+    _other_user, other_token = _create_account(client)
+    denied = client.get(
+        f"/evidence/{evidence['id']}/content", headers=_headers(other_token)
+    )
+    assert denied.status_code == 404
