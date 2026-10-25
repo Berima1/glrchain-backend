@@ -1,0 +1,16 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+# Baseline static checks: syntax/obvious correctness, undefined/unused names, and import order.
+# FastAPI's Depends/File/Query injection is intentionally expressed as parameter defaults.
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.ruff.lint.per-file-ignores]
+# The tests set env vars before importing app.main; moving app imports above those
+# assignments would change the tested configuration. Preserve that intentional order.
+"tests/*.py" = ["I001"]
