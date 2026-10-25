@@ -1,6 +1,14 @@
 from logging.config import fileConfig
 import asyncio
 import os
+from pathlib import Path
+import sys
+
+# Alembic can execute with its own directory on sys.path; add the repository root
+# explicitly so the app package imports consistently in CI and deployed builds.
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from alembic import context
 from sqlalchemy import pool
