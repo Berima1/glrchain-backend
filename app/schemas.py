@@ -9,6 +9,10 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=12, max_length=128)
 
 
+class FirebaseProvision(BaseModel):
+    username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
+
+
 class UserLogin(BaseModel):
     username: str = Field(min_length=3, max_length=64)
     password: str = Field(min_length=1, max_length=128)
