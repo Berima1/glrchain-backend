@@ -47,3 +47,11 @@ Inspected the live GitHub contents of `Berima1/glrchain-backend` and found broke
 - Added a strict CORS origin allowlist; production startup and the Cloud Run release workflow require approved frontend origins.
 - Changed initial administrator bootstrap to require a pre-approved, verified Firebase UID and to create a Firebase-backed admin profile, not a local-password account that production Firebase mode would reject.
 - Current CI must be rechecked at the newest commit to verify these later code and test changes; earlier green results do not automatically apply to newer commits.
+
+
+### Sentinel-2 surface-change screening stage
+
+- Added `pipeline/eo_change.py`, a real offline processor for two co-registered Sentinel-2 L2A analysis-ready stacks. It validates band order, provenance, product dates, CRS/grid, pixel size, quantification value and per-band BOA offsets; masks invalid SCL classes and water; calculates NDVI, BSI and NBR changes; requires multiple explicit threshold signals; labels connected regions; filters by area; and writes a GeoTIFF candidate mask, WGS84 GeoJSON and a SHA-256 run manifest.
+- Added deterministic synthetic-raster tests for radiometric offset handling, clouds, candidate polygon output, area filtering, CRS conversion, no-change scenes, grid mismatch, acquisition ordering, and invalid thresholds.
+- Added the satellite pipeline method/metadata/outputs/limitations document and updated architecture/README/testing docs.
+- Important limitation: the stack preparation tool, official Copernicus catalog/search/download, durable Cloud Run worker, database candidate ingestion, Ghana-specific threshold calibration, accuracy report, and human review workflow remain outstanding. These outputs are surface-change candidates only, not determinations of galamsey or illegality. Tests use synthetic pixels and do not establish real-world detection accuracy.
