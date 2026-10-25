@@ -2,7 +2,7 @@
 
 GLRChain is intended to support auditable land and natural-resource reporting, protected evidence handling, and eventually validated satellite-change candidates for authorised human review.
 
-**Current release state: engineering foundation under review, not approved for national production use.** This repository does not currently deliver a validated satellite detector or a real blockchain anchoring service. Do not describe either as operational.
+**Current release state: engineering foundation under review, not approved for national production use.** This repository now includes a tested offline Sentinel-2 surface-change screening tool, but not a validated national detector, automatic Copernicus acquisition/stack preparation, Cloud Run processing worker, or database ingestion of candidates. A real blockchain anchoring service is also not implemented. Do not describe these unfinished parts as operational.
 
 ## What the current foundation contains
 
@@ -15,13 +15,14 @@ GLRChain is intended to support auditable land and natural-resource reporting, p
 - Real database-backed admin statistics.
 - CI checks for Python compilation, PostgreSQL/PostGIS migrations, automated API tests and Docker image build.
 - A manual Google Cloud Run deployment workflow gated to `main`, using Workload Identity Federation rather than a service-account key file.
+- A reproducible Sentinel-2 L2A surface-change screening CLI that validates input grid/provenance, uses radiometric offsets and SCL masking, calculates NDVI/BSI/NBR change, and emits GeoJSON candidates plus a SHA-256 manifest.
 
 ## Important system boundaries
 
 - **Authoritative database:** Cloud SQL/PostgreSQL with PostGIS is the target for official records and future geometry queries. Firestore is not used as the authoritative store by this API; it may support carefully designed realtime features later.
 - **Evidence:** bucket configuration and real Google Cloud IAM must be tested before sensitive evidence is accepted. The current automated evidence tests use a controlled storage stub; they do not prove a real bucket is configured.
 - **Audit:** the hash chain is tamper-evident, not immutable. A database superuser could rewrite the entire table and head. Independent audit export and retention are still required.
-- **Geospatial detection:** no production Sentinel-1/Sentinel-2 acquisition or change-detection algorithm is released.
+- **Geospatial detection:** the current EO module is an offline candidate-screening algorithm. It is not yet connected to Copernicus download, stack preparation, durable Cloud Run jobs, PostgreSQL/PostGIS candidate storage, or a Ghana-calibrated reviewer workflow.
 - **Blockchain:** no working contract deployment/transaction confirmation is released. Fake anchoring routes have been removed from active API code.
 - **Deployment:** no deployment should occur simply because the workflow exists. Real Google Cloud resources, identity, secrets, database roles, bucket policy, backup and monitoring configuration must be completed first.
 
@@ -69,6 +70,7 @@ Use `requirements-dev.txt` for tests. Optional worker and ML packages are separa
 - [Google Cloud/Firebase setup and deployment](docs/GOOGLE_CLOUD_SETUP.md)
 - [Operations runbook](docs/OPERATIONS_RUNBOOK.md)
 - [Legacy data migration plan](docs/LEGACY_DATA_MIGRATION.md)
+- [Sentinel-2 surface-change pipeline](docs/SATELLITE_CHANGE_PIPELINE.md)
 - [Testing and validation strategy](docs/TESTING_AND_VALIDATION.md)
 - [Release gates](docs/RELEASE_GATES.md)
 - [Architecture decisions](docs/DECISIONS.md)
