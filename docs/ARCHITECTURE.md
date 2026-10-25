@@ -20,7 +20,7 @@ Use each service for a clear purpose:
 
 1. A client signs in through Firebase Authentication and sends a Firebase ID token over HTTPS.
 2. The API verifies the token (including revocation where supported), resolves the Firebase UID to a GLRChain profile, then checks the profile's current database role.
-3. A report description is encrypted with the configured report key before insertion. The report row, owner/status fields, and audit event are committed in one database transaction.
+3. A new report's description and human-readable location are encrypted with the configured report key before insertion. The report row, owner/status fields, and audit event are committed in one database transaction.
 4. Evidence is checked for allowed file signature and size, then uploaded to private Cloud Storage with a SHA-256 metadata field and a create-only generation precondition.
 5. Evidence metadata and its audit event are committed to PostgreSQL. If this transaction fails, the API attempts to delete the uploaded object; production operations must also monitor and clean up any orphaned object if compensation itself fails.
 6. On evidence download, the API authorises access, retrieves the private object, recomputes SHA-256, rejects a digest mismatch, logs the access event, and returns it as an attachment with `no-store` and `nosniff` headers.
