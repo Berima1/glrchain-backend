@@ -18,7 +18,8 @@ This repository is under staged hardening. **It is not currently approved for na
 
 - `DATABASE_URL`: PostgreSQL connection URL (PostGIS-enabled PostgreSQL is recommended for the future geospatial layer).
 - `SECRET_KEY`: a persistent random secret of at least 32 characters for JWT signing.
-- `REPORT_ENCRYPTION_KEY`: a persistent Fernet key, generated once and stored in a secret manager. Do not regenerate it on every restart; existing encrypted report descriptions depend on it.
+- `REPORT_ENCRYPTION_KEY`: a persistent Fernet key for new report descriptions (key version 2), generated once and stored in a secret manager. Do not regenerate it on every restart.
+- `LEGACY_REPORT_ENCRYPTION_KEY`: set to the original Fernet-compatible `SECRET_KEY` used by the previous deployment if existing version-1 reports need to be read and that value is no longer the current `SECRET_KEY`. Keep it only for the required migration window, then perform a controlled re-encryption/key-rotation operation before retiring it. Never guess or silently replace a missing legacy key.
 - `GLRCHAIN_EVIDENCE_BUCKET`: the name of a private Google Cloud Storage bucket. The deployed service identity needs only the permissions required to write, read, and delete the evidence objects it owns.
 
 Use Google Cloud Secret Manager or an equivalent managed secret store. Never commit production values to GitHub. Configure the bucket with uniform bucket-level access, public access prevention, appropriate retention/versioning policies, and an audited service identity before accepting sensitive evidence.
