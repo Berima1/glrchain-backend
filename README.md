@@ -68,6 +68,7 @@ Use `requirements-dev.txt` for tests. Optional worker and ML packages are separa
 - [Security operations](docs/SECURITY_OPERATIONS.md)
 - [Google Cloud/Firebase setup and deployment](docs/GOOGLE_CLOUD_SETUP.md)
 - [Operations runbook](docs/OPERATIONS_RUNBOOK.md)
+- [Legacy data migration plan](docs/LEGACY_DATA_MIGRATION.md)
 - [Testing and validation strategy](docs/TESTING_AND_VALIDATION.md)
 - [Release gates](docs/RELEASE_GATES.md)
 - [Architecture decisions](docs/DECISIONS.md)
