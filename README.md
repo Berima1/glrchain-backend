@@ -1,50 +1,90 @@
-# GLRChain API — Ghana Land & Natural Resources
+# GLRChain — Ghana Land & Natural Resources
 
-GLRChain is intended to support auditable land and natural-resource records, protected incident reporting, evidence chain of custody, and eventually validated geospatial change detection for authorised human review.
+GLRChain is intended to support auditable land and natural-resource reporting, protected evidence handling, and eventually validated satellite-change candidates for authorised human review.
 
-This repository is under staged hardening. **It is not currently approved for national production deployment.** Do not describe satellite detection, AI risk scoring, blockchain anchoring, or Firebase integration as operational unless their implementation, configuration, and independent tests are merged and verified.
+**Current release state: engineering foundation under review, not approved for national production use.** This repository does not currently deliver a validated satellite detector or a real blockchain anchoring service. Do not describe either as operational.
 
-## Implemented in the current API branch
+## What the current foundation contains
 
-- User registration creates only the normal `user` role. Privileged roles cannot be assigned through public registration.
-- Password login issues time-limited bearer JWTs; protected routes check the token and database account.
-- Reports are persisted in PostgreSQL and their descriptions are encrypted with a separately configured Fernet key.
-- Report access is scoped to the submitter unless the database account has a privileged role.
-- Evidence upload uses a private Google Cloud Storage bucket, verifies supported file signatures, enforces a size limit, records SHA-256 metadata, and verifies the digest on download.
-- Missing secrets or evidence-storage configuration cause explicit failures instead of fake success responses.
-- Alembic migrations and automated API tests are part of CI.
+- PostgreSQL-backed users, reports, evidence metadata and schema migrations.
+- Local username/password mode for controlled development and automated tests.
+- A production path for server-side Firebase ID-token verification and profile provisioning. Public provisioning assigns only the normal `user` role.
+- Report description encryption with explicit key versions to preserve compatibility with legacy records.
+- Private Google Cloud Storage upload/download code, size and file-signature checks, SHA-256 recording and verification.
+- Transactional, hash-chained application audit events for key report/evidence/account operations, plus privileged chain verification.
+- Real database-backed admin statistics.
+- CI checks for Python compilation, PostgreSQL/PostGIS migrations, automated API tests and Docker image build.
+- A manual Google Cloud Run deployment workflow gated to `main`, using Workload Identity Federation rather than a service-account key file.
 
-## Required runtime configuration
+## Important system boundaries
 
-- `DATABASE_URL`: PostgreSQL connection URL (PostGIS-enabled PostgreSQL is recommended for the future geospatial layer).
-- `SECRET_KEY`: a persistent random secret of at least 32 characters for JWT signing.
-- `REPORT_ENCRYPTION_KEY`: a persistent Fernet key for new report descriptions (key version 2), generated once and stored in a secret manager. Do not regenerate it on every restart.
-- `LEGACY_REPORT_ENCRYPTION_KEY`: set to the original Fernet-compatible `SECRET_KEY` used by the previous deployment if existing version-1 reports need to be read and that value is no longer the current `SECRET_KEY`. Keep it only for the required migration window, then perform a controlled re-encryption/key-rotation operation before retiring it. Never guess or silently replace a missing legacy key.
-- `GLRCHAIN_EVIDENCE_BUCKET`: the name of a private Google Cloud Storage bucket. The deployed service identity needs only the permissions required to write, read, and delete the evidence objects it owns.
+- **Authoritative database:** Cloud SQL/PostgreSQL with PostGIS is the target for official records and future geometry queries. Firestore is not used as the authoritative store by this API; it may support carefully designed realtime features later.
+- **Evidence:** bucket configuration and real Google Cloud IAM must be tested before sensitive evidence is accepted. The current automated evidence tests use a controlled storage stub; they do not prove a real bucket is configured.
+- **Audit:** the hash chain is tamper-evident, not immutable. A database superuser could rewrite the entire table and head. Independent audit export and retention are still required.
+- **Geospatial detection:** no production Sentinel-1/Sentinel-2 acquisition or change-detection algorithm is released.
+- **Blockchain:** no working contract deployment/transaction confirmation is released. Fake anchoring routes have been removed from active API code.
+- **Deployment:** no deployment should occur simply because the workflow exists. Real Google Cloud resources, identity, secrets, database roles, bucket policy, backup and monitoring configuration must be completed first.
 
-Use Google Cloud Secret Manager or an equivalent managed secret store. Never commit production values to GitHub. Configure the bucket with uniform bucket-level access, public access prevention, appropriate retention/versioning policies, and an audited service identity before accepting sensitive evidence.
+## API endpoints
 
-For a local-only test run, install `requirements-dev.txt`. The test suite explicitly enables schema creation only in the test process; deployed environments must run Alembic migrations. The API-only image does not install the optional deep-learning stack; see `requirements-worker.txt` and `requirements-ml.txt` for separated worker dependencies.
+| Endpoint | Purpose |
+|---|---|
+| `GET /` | Service metadata |
+| `GET /health/live` | Process liveness |
+| `GET /health/ready` | Database readiness |
+| `POST /auth/register`, `POST /auth/login` | Local development/test identity only |
+| `POST /auth/provision` | Create/idempotently return a GLRChain profile for an already verified Firebase ID token |
+| `GET /auth/me` | Return the caller's current profile |
+| `POST /reports`, `GET /reports`, `GET /reports/{report_id}` | Authenticated, access-controlled report operations |
+| `POST /evidence`, `GET /evidence/{evidence_id}`, `GET /evidence/{evidence_id}/content` | Private evidence handling and integrity-checked retrieval |
+| `GET /admin/stats` | Real database counts; administrator only |
+| `GET /admin/audit/events` | Audit events; administrator/validator only |
+| `GET /admin/audit/verify` | Audit-chain verification; administrator/validator only |
 
-## API overview
+Interactive API docs are available at `/docs` when a configured instance is running.
 
-- `GET /`: service metadata.
-- `GET /health/live`: process liveness.
-- `GET /health/ready`: database readiness.
-- `POST /auth/register`, `POST /auth/login`, `GET /auth/me`: account and token endpoints.
-- `POST /reports`, `GET /reports`, `GET /reports/{report_id}`: authenticated, access-controlled reporting.
-- `POST /evidence`, `GET /evidence/{evidence_id}`, `GET /evidence/{evidence_id}/content`: private evidence storage and integrity-checked retrieval.
-- `GET /admin/stats`: real database counts, administrators only.
+## Configuration
 
-Interactive API documentation is available at `/docs` when the service is running.
+Runtime configuration expected for a production API:
 
-## Not yet approved / remaining engineering work
+- `APP_ENV=production`
+- `GLRCHAIN_AUTH_PROVIDER=firebase`
+- `FIREBASE_PROJECT_ID`
+- `DATABASE_URL` for the least-privilege runtime PostgreSQL user
+- `SECRET_KEY` (persistent compatibility/application secret; never commit it)
+- `REPORT_ENCRYPTION_KEY` (persistent Fernet key; store in Secret Manager and pin a tested version)
+- `GLRCHAIN_EVIDENCE_BUCKET` (private bucket name)
 
-1. Provisioning and governance for authorised MLNR/admin/validator accounts, including audited role changes and multi-factor identity controls.
-2. Formal audit events and tamper-evident chain-of-custody logging, retention rules, backup/restore drills, and access reviews.
-3. Google Cloud deployment, service-account least privilege, private networking, managed secrets, monitoring, alerting, and disaster recovery.
-4. Real Sentinel-1/Sentinel-2 acquisition and geospatial change detection with a labelled Ghana validation set, measured false-positive rates, and a human-review workflow. No placeholder detector should be enabled.
-5. Real blockchain anchoring using a governed network and verified transaction receipts; no demo transaction IDs are accepted.
-6. Security review, load testing, threat modelling, and an independently signed release checklist.
+If migrating legacy records, configure `LEGACY_REPORT_ENCRYPTION_KEY` to the correct historical Fernet key as documented in the operations guide. Never rotate or replace the old key before verifying legacy decryption on a restored copy.
 
-An HTTP 200 response only confirms the corresponding endpoint responded; it does not certify the whole national system.
+Use `requirements-dev.txt` for tests. Optional worker and ML packages are separated into `requirements-worker.txt` and `requirements-ml.txt`.
+
+## Documentation
+
+- [Project charter](docs/PROJECT_CHARTER.md)
+- [Architecture and data flow](docs/ARCHITECTURE.md)
+- [Data dictionary](docs/DATA_DICTIONARY.md)
+- [Security threat model](docs/SECURITY_THREAT_MODEL.md)
+- [Security operations](docs/SECURITY_OPERATIONS.md)
+- [Google Cloud/Firebase setup and deployment](docs/GOOGLE_CLOUD_SETUP.md)
+- [Operations runbook](docs/OPERATIONS_RUNBOOK.md)
+- [Testing and validation strategy](docs/TESTING_AND_VALIDATION.md)
+- [Release gates](docs/RELEASE_GATES.md)
+- [Architecture decisions](docs/DECISIONS.md)
+- [Engineering work log](docs/WORK_LOG.md)
+
+## Local validation
+
+```bash
+pip install -r requirements-dev.txt
+python -m compileall -q app
+alembic upgrade head
+python -m pytest -q
+docker build -t glrchain-backend:test .
+```
+
+Use test-only keys and synthetic data. Never run database migrations against production merely to experiment. Review `docs/RELEASE_GATES.md` before any release.
+
+## Project status and team discipline
+
+The first foundation pass repaired the reporting/database/authentication path and established a real CI pipeline. Further audit, Firebase, migration and Cloud Run changes are under review and must pass CI at the exact final commit before merging. A green CI run validates only the checks that it actually ran; it is not evidence that the national system, cloud integrations, detection model or blockchain are production-ready.
