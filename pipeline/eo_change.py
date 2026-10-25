@@ -552,7 +552,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--bsi-rise", type=float, required=True, help="Minimum Bare Soil Index increase.")
     parser.add_argument("--nbr-drop", type=float, required=True, help="Minimum NBR decrease.")
     parser.add_argument("--min-signals", type=int, choices=(1, 2, 3), default=2)
-    parser.add_argument("--min-area-m2", type=float, default=1_000.0)
+    parser.add_argument("--min-area-m2", type=float, required=True)
     parser.add_argument("--max-pixels", type=int, default=DEFAULT_MAX_PIXELS)
     return parser
 
