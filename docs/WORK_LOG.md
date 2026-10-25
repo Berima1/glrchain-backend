@@ -20,7 +20,7 @@ Inspected the live GitHub contents of `Berima1/glrchain-backend` and found broke
 - Added report/evidence models and Alembic migration steps for roles, ownership, timestamps, evidence metadata, audit events and Firebase UID mapping.
 - Added local-mode short-lived bearer JWT authentication with server-controlled roles and password-hash upgrade logic.
 - Added Firebase ID-token verification/provisioning path for production; production startup requires Firebase provider configuration.
-- Added report description encryption with explicit key versions; legacy data is marked version 1 rather than silently re-encrypted.
+- Added description encryption and later location encryption with explicit key versions; legacy encrypted descriptions are marked version 1 and legacy plaintext locations version 0 rather than silently rewritten.
 - Added private GCS evidence code with file signature/size limits and SHA-256 validation.
 - Added transactional hash-chained audit events for registration/login/report/evidence/admin-stat operations, plus privileged verification and event listing.
 - Added a controlled one-time initial-admin command (not an HTTP route).
