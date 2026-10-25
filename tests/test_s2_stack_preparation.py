@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 import rasterio
 from rasterio.transform import from_origin
+from rasterio.warp import transform as transform_coords
 
 from pipeline.prepare_s2_stack import prepare_s2_stack
 
@@ -162,3 +163,75 @@ def test_allows_legacy_baseline_without_offset_metadata(tmp_path: Path) -> None:
 
     with rasterio.open(output) as stack:
         assert stack.tags()["BOA_ADD_OFFSET_B08"] == "0.0"
+
+
+def test_aoi_geojson_clips_stack_and_records_provenance(tmp_path: Path) -> None:
+    metadata = _write_product_metadata(tmp_path / "MTD_MSIL2A.xml")
+    bands = _make_source_bands(tmp_path)
+
+    # Triangle inside the B11 scene: a 200 m x 200 m bounding box gives a 10x10
+    # pixel output tile, while the AOI mask leaves pixels outside the polygon as NoData.
+    eastings = [500_100, 500_300, 500_100, 500_100]
+    northings = [699_800, 699_800, 699_600, 699_800]
+    longitudes, latitudes = transform_coords(CRS, "EPSG:4326", eastings, northings)
+    coordinates = [[lon, lat] for lon, lat in zip(longitudes, latitudes, strict=True)]
+    aoi = tmp_path / "aoi.geojson"
+    aoi.write_text(
+        json.dumps({
+            "type": "FeatureCollection",
+            "features": [{
+                "type": "Feature",
+                "properties": {"name": "synthetic-test-aoi"},
+                "geometry": {"type": "Polygon", "coordinates": [coordinates]},
+            }],
+        }),
+        encoding="utf-8",
+    )
+    output = tmp_path / "aoi_stack.tif"
+
+    result = prepare_s2_stack(
+        metadata_xml=metadata,
+        b02_path=bands["B02"],
+        b04_path=bands["B04"],
+        b08_path=bands["B08"],
+        b11_path=bands["B11"],
+        b12_path=bands["B12"],
+        scl_path=bands["SCL"],
+        output_path=output,
+        aoi_geojson=aoi,
+        max_pixels=100,
+    )
+
+    assert result["status"] == "completed"
+    manifest = json.loads(Path(result["manifest_path"]).read_text("utf-8"))
+    assert manifest["grid"]["width"] == 10
+    assert manifest["grid"]["height"] == 10
+    assert manifest["grid"]["max_pixels"] == 100
+    assert manifest["grid"]["aoi_geojson_sha256"] == hashlib.sha256(aoi.read_bytes()).hexdigest()
+
+    with rasterio.open(output) as stack:
+        assert (stack.width, stack.height) == (10, 10)
+        b02 = stack.read(1)
+        scl = stack.read(6)
+        assert np.count_nonzero(b02 == 0) > 0
+        assert np.count_nonzero(b02 > 0) > 0
+        assert np.count_nonzero(scl == 0) > 0
+        assert np.count_nonzero(scl == 4) > 0
+        assert stack.tags()["AOI_GEOJSON_SHA256"] == manifest["grid"]["aoi_geojson_sha256"]
+
+
+def test_refuses_scene_exceeding_pixel_limit_without_aoi(tmp_path: Path) -> None:
+    metadata = _write_product_metadata(tmp_path / "MTD_MSIL2A.xml")
+    bands = _make_source_bands(tmp_path)
+    with pytest.raises(ValueError, match="exceeding the configured limit"):
+        prepare_s2_stack(
+            metadata_xml=metadata,
+            b02_path=bands["B02"],
+            b04_path=bands["B04"],
+            b08_path=bands["B08"],
+            b11_path=bands["B11"],
+            b12_path=bands["B12"],
+            scl_path=bands["SCL"],
+            output_path=tmp_path / "over-limit-stack.tif",
+            max_pixels=100,
+        )
