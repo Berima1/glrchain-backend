@@ -1,150 +1,119 @@
-import os
 import logging
-from fastapi import FastAPI, Depends, UploadFile, File, HTTPException
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy import text, select
-from pydantic import BaseModel
+import os
+from contextlib import asynccontextmanager
+
 from cryptography.fernet import Fernet
-import aiofiles
-from passlib.context import CryptContext
+from fastapi import FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
-# ======================================================
-# CONFIG
-# ======================================================
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./glrchain.db")
-SECRET_KEY = os.getenv("SECRET_KEY")
+from app.database import engine
+from app.models import Base
+from app.routes import admin, auth, reports
 
-if not SECRET_KEY:
-    SECRET_KEY = Fernet.generate_key().decode()
-    logging.warning("⚠️ No SECRET_KEY found, generating one automatically.")
-
-engine = create_async_engine(DATABASE_URL, echo=False, future=True)
-AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-cipher = Fernet(SECRET_KEY.encode() if isinstance(SECRET_KEY, str) else SECRET_KEY)
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("glrchain")
 
+
+def validate_production_configuration() -> None:
+    app_env = os.getenv("APP_ENV", "development").strip().lower()
+    if app_env not in {"prod", "production"}:
+        return
+
+    jwt_secret = os.getenv("SECRET_KEY")
+    if not jwt_secret or len(jwt_secret) < 32:
+        raise RuntimeError("Production requires a persistent SECRET_KEY of at least 32 characters.")
+
+    encryption_key = os.getenv("REPORT_ENCRYPTION_KEY")
+    if not encryption_key:
+        raise RuntimeError("Production requires REPORT_ENCRYPTION_KEY.")
+    try:
+        Fernet(encryption_key.encode("ascii"))
+    except (ValueError, TypeError, UnicodeEncodeError) as exc:
+        raise RuntimeError("REPORT_ENCRYPTION_KEY must be a valid persistent Fernet key.") from exc
+
+    if not os.getenv("GLRCHAIN_EVIDENCE_BUCKET"):
+        raise RuntimeError("Production requires GLRCHAIN_EVIDENCE_BUCKET for private evidence storage.")
+
+    if os.getenv("GLRCHAIN_AUTH_PROVIDER", "").strip().lower() != "firebase":
+        raise RuntimeError("Production requires GLRCHAIN_AUTH_PROVIDER=firebase; local password auth is for controlled development only.")
+    if not os.getenv("FIREBASE_PROJECT_ID"):
+        raise RuntimeError("Production requires FIREBASE_PROJECT_ID for Firebase ID-token verification.")
+    if not os.getenv("GLRCHAIN_ALLOWED_ORIGINS", "").strip():
+        raise RuntimeError("Production requires GLRCHAIN_ALLOWED_ORIGINS with the approved frontend origin(s).")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    validate_production_configuration()
+    # Auto-creation is available only for explicit local/test use. Deployments must
+    # apply reviewed Alembic migrations before the service is started.
+    if os.getenv("GLRCHAIN_CREATE_SCHEMA_ON_STARTUP", "false").lower() == "true":
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+    yield
+    await engine.dispose()
+
+
 app = FastAPI(
-    title="GLRChain Backend",
-    description="Backend API for GLRChain - Fighting galamsey with AI, Blockchain, and Encryption",
-    version="1.0.0"
+    title="GLRChain API",
+    description=(
+        "Ghana land and natural-resource reporting API. Satellite intelligence and "
+        "blockchain evidence anchoring are not exposed as operational endpoints until "
+        "their implementations are deployed and independently tested."
+    ),
+    version="0.2.0",
+    lifespan=lifespan,
 )
 
-# ======================================================
-# MODELS
-# ======================================================
-from app.models import Base, User
+# Browser access is restricted to explicit origins. Native clients are not governed by CORS,
+# so every sensitive endpoint must still enforce server-side authentication and authorisation.
+allowed_origins = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv(
+        "GLRCHAIN_ALLOWED_ORIGINS",
+        "http://localhost:3000,http://localhost:5173",
+    ).split(",")
+    if origin.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+    max_age=600,
+)
 
-class Report(BaseModel):
-    reporter: str
-    location: str
-    description: str
+app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
+app.include_router(reports.router, tags=["Reports and Evidence"])
+app.include_router(admin.router, prefix="/admin", tags=["Administration"])
 
-class UserCreate(BaseModel):
-    username: str
-    password: str
 
-class UserLogin(BaseModel):
-    username: str
-    password: str
-
-# ======================================================
-# DEPENDENCIES
-# ======================================================
-async def get_db():
-    async with AsyncSessionLocal() as session:
-        yield session
-
-# ======================================================
-# STARTUP: Auto-create tables
-# ======================================================
-@app.on_event("startup")
-async def startup():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("✅ Database tables created or verified.")
-
-# ======================================================
-# AUTH ROUTES
-# ======================================================
-@app.post("/signup")
-async def signup(user: UserCreate, db: AsyncSession = Depends(get_db)):
-    hashed_pw = pwd_context.hash(user.password)
-
-    # Check if username exists
-    result = await db.execute(select(User).where(User.username == user.username))
-    existing_user = result.scalar_one_or_none()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="❌ Username already taken")
-
-    new_user = User(username=user.username, hashed_password=hashed_pw)
-    db.add(new_user)
-    await db.commit()
-    return {"message": "✅ User registered successfully"}
-
-@app.post("/login")
-async def login(user: UserLogin, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.username == user.username))
-    db_user = result.scalar_one_or_none()
-    if not db_user:
-        raise HTTPException(status_code=401, detail="❌ Invalid username or password")
-
-    if not pwd_context.verify(user.password, db_user.hashed_password):
-        raise HTTPException(status_code=401, detail="❌ Invalid username or password")
-
-    return {"message": "✅ Login successful"}
-
-# ======================================================
-# EXISTING ROUTES
-# ======================================================
-@app.get("/")
+@app.get("/", tags=["Service"])
 async def home():
     return {
-        "status": "GLRChain backend running 🚀",
-        "mission": "Protect Ghana’s lands & fight illegal mining (galamsey)"
+        "service": "GLRChain API",
+        "status": "running",
+        "purpose": "Ghana land and natural-resource reporting",
+        "api_docs": "/docs",
     }
 
-@app.get("/health")
-async def health():
+
+@app.get("/health/live", tags=["Health"])
+async def liveness():
+    return {"status": "alive"}
+
+
+@app.get("/health/ready", tags=["Health"])
+async def readiness():
     try:
-        async with engine.connect() as conn:
-            await conn.execute(text("SELECT 1"))
-        return {"database": "ok", "status": "healthy"}
-    except Exception as e:
-        logger.error(f"DB check failed: {e}")
-        return {"database": "error", "status": "unhealthy"}
-
-@app.post("/report")
-async def report_case(report: Report, db: AsyncSession = Depends(get_db)):
-    encrypted_desc = cipher.encrypt(report.description.encode()).decode()
-    logger.info(f"Encrypted galamsey report from {report.reporter} at {report.location}")
-
-    await db.execute(
-        text("INSERT INTO reports (reporter, location, description) VALUES (:r, :l, :d)"),
-        {"r": report.reporter, "l": report.location, "d": encrypted_desc}
-    )
-    await db.commit()
-
-    return {"message": "Report received ✅ Encrypted and stored securely."}
-
-@app.post("/upload-evidence")
-async def upload_evidence(file: UploadFile = File(...)):
-    save_path = f"evidence/{file.filename}"
-    os.makedirs("evidence", exist_ok=True)
-    async with aiofiles.open(save_path, "wb") as out_file:
-        content = await file.read()
-        await out_file.write(content)
-
-    return {"message": f"Evidence file {file.filename} uploaded successfully ✅"}
-
-@app.get("/intel")
-async def get_intel():
-    fake_alerts = [
-        {"location": "Eastern Region", "risk": "High", "pattern": "Unlicensed excavation detected"},
-        {"location": "Western Region", "risk": "Medium", "pattern": "River pollution signals"}
-    ]
-    return {"alerts": fake_alerts, "note": "AI module running (demo mode)"}
+        async with engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+    except Exception:
+        logger.exception("Readiness check failed.")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database readiness check failed.",
+        )
+    return {"status": "ready", "database": "ok"}

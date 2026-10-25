@@ -1,15 +1,108 @@
-GLRChain Backend (Heavyweight) - MLNR
+# GLRChain — Ghana Land & Natural Resources
 
-This package contains a production-minded FastAPI backend scaffold with anti-galamsey modules.
+GLRChain is intended to support auditable land and natural-resource reporting, protected evidence handling, and eventually validated satellite-change candidates for authorised human review.
 
-Upload this package to a new GitHub repo and connect to Render/Railway for deployment (no heavy local storage needed).
+**Current release state: engineering foundation under review, not approved for national production use.** This repository now includes a tested offline Sentinel-2 surface-change screening tool, but not a validated national detector, automatic Copernicus acquisition/stack preparation, Cloud Run processing worker, or database ingestion of candidates. A real blockchain anchoring service is also not implemented. Do not describe these unfinished parts as operational.
 
-Essential env variables:
-DATABASE_URL
-SECRET_KEY
-ANCHOR_RPC_URL
-IPFS_PINATA_KEY
-IPFS_PINATA_SECRET
-KMS_ARN (optional)
+## What the current foundation contains
 
-Security: Use KMS/HSM for private keys; do not store secrets in repo.
+- PostgreSQL-backed users, reports, evidence metadata and schema migrations.
+- Local username/password mode for controlled development and automated tests.
+- A production path for server-side Firebase ID-token verification and profile provisioning. Public provisioning assigns only the normal `user` role.
+- New report descriptions and locations are encrypted with explicit key versions; legacy plaintext locations and legacy encrypted descriptions are versioned separately for backward-compatible migration.
+- Private Google Cloud Storage upload/download code, size and file-signature checks, SHA-256 recording and verification.
+- Transactional, hash-chained application audit events for key report/evidence/account operations, plus privileged chain verification.
+- Real database-backed admin statistics.
+- CI checks for Python compilation, PostgreSQL/PostGIS migrations, automated API tests and Docker image build.
+- A manual Google Cloud Run deployment workflow gated to `main`, using Workload Identity Federation rather than a service-account key file.
+- A reproducible Sentinel-2 L2A surface-change screening CLI that validates input grid/provenance, uses radiometric offsets and SCL masking, calculates NDVI/BSI/NBR change, and emits GeoJSON candidates plus a SHA-256 manifest.
+
+## Important system boundaries
+
+- **Authoritative database:** Cloud SQL/PostgreSQL with PostGIS is the target for official records and future geometry queries. Firestore is not used as the authoritative store by this API; it may support carefully designed realtime features later.
+- **Evidence:** bucket configuration and real Google Cloud IAM must be tested before sensitive evidence is accepted. The current automated evidence tests use a controlled storage stub; they do not prove a real bucket is configured.
+- **Audit:** the hash chain is tamper-evident, not immutable. A database superuser could rewrite the entire table and head. Independent audit export and retention are still required.
+- **Geospatial detection:** the current EO module is an offline candidate-screening algorithm. It is not yet connected to Copernicus download, stack preparation, durable Cloud Run jobs, PostgreSQL/PostGIS candidate storage, or a Ghana-calibrated reviewer workflow.
+- **Blockchain:** no working contract deployment/transaction confirmation is released. Fake anchoring routes have been removed from active API code.
+- **Deployment:** no deployment should occur simply because the workflow exists. Real Google Cloud resources, identity, secrets, database roles, bucket policy, backup and monitoring configuration must be completed first.
+
+## API endpoints
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /` | Service metadata |
+| `GET /health/live` | Process liveness |
+| `GET /health/ready` | Database readiness |
+| `POST /auth/register`, `POST /auth/login` | Local development/test identity only |
+| `POST /auth/provision` | Create/idempotently return a GLRChain profile for an already verified Firebase ID token |
+| `GET /auth/me` | Return the caller's current profile |
+| `POST /reports`, `GET /reports`, `GET /reports/{report_id}` | Authenticated, access-controlled report operations |
+| `POST /evidence`, `GET /evidence/{evidence_id}`, `GET /evidence/{evidence_id}/content` | Private evidence handling and integrity-checked retrieval |
+| `GET /admin/stats` | Real database counts; administrator only |
+| `GET /admin/audit/events` | Audit events; administrator/validator only |
+| `GET /admin/audit/verify` | Audit-chain verification; administrator/validator only |
+
+Interactive API docs are available at `/docs` when a configured instance is running.
+
+## Configuration
+
+Runtime configuration expected for a production API:
+
+- `APP_ENV=production`
+- `GLRCHAIN_AUTH_PROVIDER=firebase`
+- `FIREBASE_PROJECT_ID`
+- `DATABASE_URL` for the least-privilege runtime PostgreSQL user
+- `SECRET_KEY` (persistent compatibility/application secret; never commit it)
+- `REPORT_ENCRYPTION_KEY` (persistent Fernet key; store in Secret Manager and pin a tested version)
+- `GLRCHAIN_EVIDENCE_BUCKET` (private bucket name)
+
+If migrating legacy records, configure `LEGACY_REPORT_ENCRYPTION_KEY` to the correct historical Fernet key as documented in the operations guide. Never rotate or replace the old key before verifying legacy decryption on a restored copy.
+
+Use `requirements-dev.txt` for tests. Optional worker and ML packages are separated into `requirements-worker.txt` and `requirements-ml.txt`.
+
+## Documentation
+
+- [Project charter](docs/PROJECT_CHARTER.md)
+- [Architecture and data flow](docs/ARCHITECTURE.md)
+- [Data dictionary](docs/DATA_DICTIONARY.md)
+- [Security threat model](docs/SECURITY_THREAT_MODEL.md)
+- [Security operations](docs/SECURITY_OPERATIONS.md)
+- [Google Cloud/Firebase setup and deployment](docs/GOOGLE_CLOUD_SETUP.md)
+- [Operations runbook](docs/OPERATIONS_RUNBOOK.md)
+- [Legacy data migration plan](docs/LEGACY_DATA_MIGRATION.md)
+- [Sentinel-2 surface-change pipeline](docs/SATELLITE_CHANGE_PIPELINE.md)
+- [Testing and validation strategy](docs/TESTING_AND_VALIDATION.md)
+- [Release gates](docs/RELEASE_GATES.md)
+- [Architecture decisions](docs/DECISIONS.md)
+- [Engineering work log](docs/WORK_LOG.md)
+
+## Local validation
+
+```bash
+pip install -r requirements-dev.txt
+python -m compileall -q app
+alembic upgrade head
+python -m pytest -q
+docker build -t glrchain-backend:test .
+```
+
+Use test-only keys and synthetic data. Never run database migrations against production merely to experiment. Review `docs/RELEASE_GATES.md` before any release.
+
+## Project status and team discipline
+
+The first foundation pass repaired the reporting/database/authentication path and established a real CI pipeline. Further audit, Firebase, migration and Cloud Run changes are under review and must pass CI at the exact final commit before merging. A green CI run validates only the checks that it actually ran; it is not evidence that the national system, cloud integrations, detection model or blockchain are production-ready.
+
+
+## Engineering documentation and release status
+
+Read these documents before deploying, reviewing, or presenting GLRChain:
+
+- [Project status and limitations](docs/PROJECT_STATUS_AND_LIMITATIONS.md) — separates implemented, tested, environment-dependent, and non-operational capabilities.
+- [Architecture decisions](docs/DECISION_LOG.md) — records the reasoning behind the current foundation choices.
+- [Google Cloud deployment runbook](docs/GOOGLE_CLOUD_DEPLOYMENT.md) — required cloud resources, IAM principles, configuration, and real-environment verification.
+- [Satellite monitoring design](docs/SATELLITE_DETECTION_DESIGN.md) — target design and validation plan; it does not claim the detection pipeline is operational.
+- [Testing and release procedure](docs/TESTING_AND_RELEASE.md) — reproducible checks and release evidence requirements.
+- [Engineering work log](docs/WORK_LOG.md) — dated changes, verification evidence, and remaining work.
+- [Security policy](SECURITY.md) — responsible disclosure and security handling.
+
+**Release warning:** a passing CI run does not prove production readiness. Do not use real sensitive reports or describe satellite detection or blockchain anchoring as operational until the relevant release gates have been independently verified. The current working branch must be reviewed before merge or deployment.

@@ -1,23 +1,11 @@
-# app/config.py
+"""Validated environment configuration for GLRChain."""
 import os
-from cryptography.fernet import Fernet
 
-def load_secret_key():
-    secret = os.getenv("SECRET_KEY")
+from app.database import database_url_from_env
 
-    if not secret:
-        # Generate one if not provided
-        secret = Fernet.generate_key().decode()
-        print("⚠️ WARNING: SECRET_KEY not set, generated a new one.")
-
-    try:
-        # Validate format
-        Fernet(secret.encode())
-    except Exception:
-        print("⚠️ WARNING: Invalid SECRET_KEY, generating new valid key.")
-        secret = Fernet.generate_key().decode()
-
-    return secret
-
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./glrchain.db")
-SECRET_KEY = load_secret_key()
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+DATABASE_URL = database_url_from_env()
+SECRET_KEY = os.getenv("SECRET_KEY")
+REPORT_ENCRYPTION_KEY = os.getenv("REPORT_ENCRYPTION_KEY")
+LEGACY_REPORT_ENCRYPTION_KEY = os.getenv("LEGACY_REPORT_ENCRYPTION_KEY")
+EVIDENCE_BUCKET = os.getenv("GLRCHAIN_EVIDENCE_BUCKET")

@@ -1,14 +1,22 @@
-name: CI - Test & Lint & Build
+name: GLRChain API CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: glrchain-api-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test-and-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgis/postgis:15-3.3
@@ -19,36 +27,44 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres -d glrchain"
           --health-interval 10s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/glrchain
+      SECRET_KEY: ci-only-glrchain-key-not-for-deployment-001122334455
+      LOG_LEVEL: WARNING
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v7
         with:
-          python-version: 3.11
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
-      - name: Install dependencies
+      - name: Install API and test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
 
-      - name: Run lint (non-fatal)
-        run: |
-          pip install flake8 || true
-          flake8 || true
+      - name: Compile application
+        run: python -m compileall -q app pipeline
 
-      - name: Run tests (placeholder)
-        run: |
-          echo "No tests configured — add tests to run here"
+      - name: Lint application and tests
+        run: ruff check app pipeline tests
 
-      - name: Build Docker image (CI only, not pushed)
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          push: false
-          tags: glrchain/backend:ci-${{ github.sha }}
+      - name: Apply migrations against PostGIS/PostgreSQL
+        run: alembic upgrade head
+
+      - name: Run API security and persistence tests
+        run: python -m pytest -q
+
+      - name: Build API container
+        run: docker build --tag glrchain-backend:ci .
