@@ -25,7 +25,7 @@ from rasterio.enums import Resampling
 from rasterio.features import bounds as geometry_bounds
 from rasterio.features import geometry_mask
 from rasterio.warp import reproject, transform_geom
-from rasterio.windows import Window, from_bounds
+from rasterio.windows import Window, bounds as window_bounds, from_bounds
 from rasterio.windows import transform as window_transform
 
 from pipeline.eo_change import BAND_NAMES, STACK_SCHEMA
@@ -157,10 +157,15 @@ def _read_aoi(path: Path, target_crs: rasterio.crs.CRS) -> tuple[list[dict[str, 
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError("AOI must be a readable GeoJSON file.") from exc
 
+    if not isinstance(payload, dict):
+        raise ValueError("AOI GeoJSON top level must be an object.")
     if payload.get("type") == "FeatureCollection":
+        features = payload.get("features", [])
+        if not isinstance(features, list) or not all(isinstance(feature, dict) for feature in features):
+            raise ValueError("AOI FeatureCollection must contain a list of Feature objects.")
         geometries = [
             feature.get("geometry")
-            for feature in payload.get("features", [])
+            for feature in features
             if feature.get("geometry") is not None
         ]
     elif payload.get("type") == "Feature":
@@ -218,10 +223,19 @@ def _validate_reference(
             max_x = max(item[2] for item in bounds)
             max_y = max(item[3] for item in bounds)
             fractional = from_bounds(min_x, min_y, max_x, max_y, source_transform)
-            col_start = max(0, math.floor(fractional.col_off))
-            row_start = max(0, math.floor(fractional.row_off))
-            col_stop = min(source_width, math.ceil(fractional.col_off + fractional.width))
-            row_stop = min(source_height, math.ceil(fractional.row_off + fractional.height))
+            # A small pixel-space tolerance avoids adding an entire border pixel
+            # when WGS84->projected round-trips perturb an exactly aligned AOI edge.
+            pixel_tolerance = 1e-7
+            col_start = max(0, math.floor(fractional.col_off + pixel_tolerance))
+            row_start = max(0, math.floor(fractional.row_off + pixel_tolerance))
+            col_stop = min(
+                source_width,
+                math.ceil(fractional.col_off + fractional.width - pixel_tolerance),
+            )
+            row_stop = min(
+                source_height,
+                math.ceil(fractional.row_off + fractional.height - pixel_tolerance),
+            )
             if col_stop <= col_start or row_stop <= row_start:
                 raise ValueError("AOI GeoJSON does not overlap the B11 reference scene.")
             target_width = col_stop - col_start
@@ -285,15 +299,40 @@ def _resample_band(
                 f"{source_path.name}: CRS differs from B11 reference grid; "
                 "reproject bands to a common granule CRS first."
             )
-        source_data = source.read(1)
         source_nodata = source.nodata if source.nodata is not None else 0
+        target_bounds = window_bounds(
+            Window(0, 0, reference["width"], reference["height"]),
+            reference["transform"],
+        )
+        fractional_source_window = from_bounds(*target_bounds, transform=source.transform)
+        # Read only the relevant source window (plus one neighbouring pixel for
+        # resampling support) when processing a clipped AOI.
+        col_start = max(0, math.floor(fractional_source_window.col_off) - 1)
+        row_start = max(0, math.floor(fractional_source_window.row_off) - 1)
+        col_stop = min(
+            source.width,
+            math.ceil(fractional_source_window.col_off + fractional_source_window.width) + 1,
+        )
+        row_stop = min(
+            source.height,
+            math.ceil(fractional_source_window.row_off + fractional_source_window.height) + 1,
+        )
+        if col_stop <= col_start or row_stop <= row_start:
+            raise ValueError(f"{band_name} source has no overlap with the requested target grid.")
+        source_window = Window(col_start, row_start, col_stop - col_start, row_stop - row_start)
+        source_data = source.read(1, window=source_window)
+        source_valid = source.read_masks(1, window=source_window) > 0
+        if not np.any(source_valid):
+            raise ValueError(f"{band_name} source has no valid pixels in the requested target grid.")
+        source_data = source_data.copy()
+        source_data[~source_valid] = source_nodata
         destination = np.zeros(
             (reference["height"], reference["width"]), dtype=np.float32
         )
         reproject(
             source=source_data,
             destination=destination,
-            src_transform=source.transform,
+            src_transform=window_transform(source_window, source.transform),
             src_crs=source.crs,
             src_nodata=source_nodata,
             dst_transform=reference["transform"],
@@ -348,8 +387,13 @@ def prepare_s2_stack(
         raise FileExistsError(
             "Stack or companion manifest already exists; choose a new output path."
         )
-    if final_path in source_paths.values() or final_path == metadata_path:
-        raise ValueError("Output path must not overwrite an input file.")
+    protected_inputs = set(source_paths.values()) | {metadata_path}
+    if aoi_geojson is not None:
+        protected_inputs.add(Path(aoi_geojson).expanduser().resolve())
+    if final_path in protected_inputs or manifest_path in protected_inputs:
+        raise ValueError("Output stack/manifest path must not overwrite any input file.")
+    if len(set(source_paths.values())) != len(source_paths):
+        raise ValueError("Each spectral band must come from a distinct input file.")
 
     if max_pixels < 1:
         raise ValueError("max_pixels must be a positive integer.")
@@ -371,7 +415,9 @@ def prepare_s2_stack(
         "SCL": "nearest",
     }
     resampled: dict[str, np.ndarray] = {}
-    input_hashes: dict[str, str] = {}
+    input_hashes: dict[str, str] = {
+        band_name: _sha256_file(source_paths[band_name]) for band_name in BAND_NAMES
+    }
     for band_name in BAND_NAMES:
         method = Resampling.nearest if band_name == "SCL" else Resampling.average
         resampled[band_name] = _resample_band(
@@ -381,8 +427,6 @@ def prepare_s2_stack(
             band_name,
             inside_aoi=reference["inside_aoi"],
         )
-        input_hashes[band_name] = _sha256_file(source_paths[band_name])
-
     final_path.parent.mkdir(parents=True, exist_ok=True)
     staging_dir = Path(
         tempfile.mkdtemp(prefix=f".{final_path.name}.staging-", dir=final_path.parent)
@@ -431,6 +475,16 @@ def prepare_s2_stack(
                 }
             )
             output.update_tags(**tags)
+
+        # Detect input mutation during preparation; a manifest must identify the
+        # exact inputs that were read, not later replacements at the same paths.
+        for band_name, source_path in source_paths.items():
+            if _sha256_file(source_path) != input_hashes[band_name]:
+                raise RuntimeError(f"{band_name} source changed during stack preparation.")
+        if _sha256_file(metadata_path) != metadata["metadata_sha256"]:
+            raise RuntimeError("Product metadata XML changed during stack preparation.")
+        if aoi_path is not None and reference["aoi_sha256"] != _sha256_file(aoi_path):
+            raise RuntimeError("AOI GeoJSON changed during stack preparation.")
 
         stack_sha256 = _sha256_file(staged_stack)
         manifest = {
