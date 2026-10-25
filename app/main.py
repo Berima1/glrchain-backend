@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from cryptography.fernet import Fernet
 from fastapi import FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.database import engine
@@ -38,6 +39,8 @@ def validate_production_configuration() -> None:
         raise RuntimeError("Production requires GLRCHAIN_AUTH_PROVIDER=firebase; local password auth is for controlled development only.")
     if not os.getenv("FIREBASE_PROJECT_ID"):
         raise RuntimeError("Production requires FIREBASE_PROJECT_ID for Firebase ID-token verification.")
+    if not os.getenv("GLRCHAIN_ALLOWED_ORIGINS", "").strip():
+        raise RuntimeError("Production requires GLRCHAIN_ALLOWED_ORIGINS with the approved frontend origin(s).")
 
 
 @asynccontextmanager
@@ -61,6 +64,25 @@ app = FastAPI(
     ),
     version="0.2.0",
     lifespan=lifespan,
+)
+
+# Browser access is restricted to explicit origins. Native clients are not governed by CORS,
+# so every sensitive endpoint must still enforce server-side authentication and authorisation.
+allowed_origins = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv(
+        "GLRCHAIN_ALLOWED_ORIGINS",
+        "http://localhost:3000,http://localhost:5173",
+    ).split(",")
+    if origin.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+    max_age=600,
 )
 
 app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
