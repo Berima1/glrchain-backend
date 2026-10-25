@@ -91,3 +91,18 @@ Use test-only keys and synthetic data. Never run database migrations against pro
 ## Project status and team discipline
 
 The first foundation pass repaired the reporting/database/authentication path and established a real CI pipeline. Further audit, Firebase, migration and Cloud Run changes are under review and must pass CI at the exact final commit before merging. A green CI run validates only the checks that it actually ran; it is not evidence that the national system, cloud integrations, detection model or blockchain are production-ready.
+
+
+## Engineering documentation and release status
+
+Read these documents before deploying, reviewing, or presenting GLRChain:
+
+- [Project status and limitations](docs/PROJECT_STATUS_AND_LIMITATIONS.md) — separates implemented, tested, environment-dependent, and non-operational capabilities.
+- [Architecture decisions](docs/DECISION_LOG.md) — records the reasoning behind the current foundation choices.
+- [Google Cloud deployment runbook](docs/GOOGLE_CLOUD_DEPLOYMENT.md) — required cloud resources, IAM principles, configuration, and real-environment verification.
+- [Satellite monitoring design](docs/SATELLITE_DETECTION_DESIGN.md) — target design and validation plan; it does not claim the detection pipeline is operational.
+- [Testing and release procedure](docs/TESTING_AND_RELEASE.md) — reproducible checks and release evidence requirements.
+- [Engineering work log](docs/WORK_LOG.md) — dated changes, verification evidence, and remaining work.
+- [Security policy](SECURITY.md) — responsible disclosure and security handling.
+
+**Release warning:** a passing CI run does not prove production readiness. Do not use real sensitive reports or describe satellite detection or blockchain anchoring as operational until the relevant release gates have been independently verified. The current working branch must be reviewed before merge or deployment.
