@@ -2,6 +2,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
+from cryptography.fernet import Fernet
 from fastapi import FastAPI, HTTPException, status
 from sqlalchemy import text
 
@@ -13,8 +14,30 @@ logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("glrchain")
 
 
+def validate_production_configuration() -> None:
+    app_env = os.getenv("APP_ENV", "development").strip().lower()
+    if app_env not in {"prod", "production"}:
+        return
+
+    jwt_secret = os.getenv("SECRET_KEY")
+    if not jwt_secret or len(jwt_secret) < 32:
+        raise RuntimeError("Production requires a persistent SECRET_KEY of at least 32 characters.")
+
+    encryption_key = os.getenv("REPORT_ENCRYPTION_KEY")
+    if not encryption_key:
+        raise RuntimeError("Production requires REPORT_ENCRYPTION_KEY.")
+    try:
+        Fernet(encryption_key.encode("ascii"))
+    except (ValueError, TypeError, UnicodeEncodeError) as exc:
+        raise RuntimeError("REPORT_ENCRYPTION_KEY must be a valid persistent Fernet key.") from exc
+
+    if not os.getenv("GLRCHAIN_EVIDENCE_BUCKET"):
+        raise RuntimeError("Production requires GLRCHAIN_EVIDENCE_BUCKET for private evidence storage.")
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    validate_production_configuration()
     # Auto-creation is available only for explicit local/test use. Deployments must
     # apply reviewed Alembic migrations before the service is started.
     if os.getenv("GLRCHAIN_CREATE_SCHEMA_ON_STARTUP", "false").lower() == "true":
