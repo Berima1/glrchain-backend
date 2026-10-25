@@ -61,7 +61,7 @@ jobs:
         run: alembic upgrade head
 
       - name: Run API security and persistence tests
-        run: pytest -q
+        run: python -m pytest -q
 
       - name: Build API container
         run: docker build --tag glrchain-backend:ci .
