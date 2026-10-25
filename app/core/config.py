@@ -1,23 +1,15 @@
-# app/config.py
+"""Environment configuration helpers for GLRChain.
+
+Secrets are deliberately not generated at runtime: replacing a key on restart can
+make previously encrypted report descriptions unreadable.
+"""
 import os
-from cryptography.fernet import Fernet
 
-def load_secret_key():
-    secret = os.getenv("SECRET_KEY")
+from app.database import normalize_database_url
 
-    if not secret:
-        # Generate one if not provided
-        secret = Fernet.generate_key().decode()
-        print("⚠️ WARNING: SECRET_KEY not set, generated a new one.")
-
-    try:
-        # Validate format
-        Fernet(secret.encode())
-    except Exception:
-        print("⚠️ WARNING: Invalid SECRET_KEY, generating new valid key.")
-        secret = Fernet.generate_key().decode()
-
-    return secret
-
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./glrchain.db")
-SECRET_KEY = load_secret_key()
+DATABASE_URL = normalize_database_url(
+    os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./glrchain.db")
+)
+SECRET_KEY = os.getenv("SECRET_KEY")
+REPORT_ENCRYPTION_KEY = os.getenv("REPORT_ENCRYPTION_KEY")
+EVIDENCE_BUCKET = os.getenv("GLRCHAIN_EVIDENCE_BUCKET")
