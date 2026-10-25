@@ -67,3 +67,11 @@ No release may be called production-ready until all gates that apply to that rel
 ## Release decision record
 
 For each release, record: reviewer names/roles, commit SHA, CI run URL, migration result, staging environment, security findings, unresolved risks, approval authority, release timestamp, deployment revision, and rollback target.
+
+
+## Additional release gates for the current cloud path
+
+- [ ] The first administrator is bound to an approved, verified Firebase UID using the one-time audited bootstrap; public account provisioning remains unable to grant roles.
+- [ ] Exact approved browser frontend origins are set in GLRCHAIN_ALLOWED_ORIGINS; allowed preflight passes and an unapproved origin does not receive CORS permission.
+- [ ] If legacy records are retained, the staged process in LEGACY_DATA_MIGRATION.md has been rehearsed on a restored backup, including legacy encryption, user mapping, evidence byte hashes, and the known historical audit gap.
+- [ ] A baseline/import event and a signed source manifest are included for legacy data; no historical audit actions are invented.
