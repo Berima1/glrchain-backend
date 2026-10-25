@@ -22,6 +22,9 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
 
+    # Existing descriptions were encrypted with the historical SECRET_KEY setting.
+    # Mark them as v1; new application writes explicitly use key version 2.
+    op.add_column("reports", sa.Column("encryption_key_version", sa.Integer(), server_default="1", nullable=False))
     op.add_column("reports", sa.Column("user_id", sa.Integer(), nullable=True))
     op.add_column(
         "reports",
@@ -69,5 +72,6 @@ def downgrade() -> None:
     op.drop_column("reports", "created_at")
     op.drop_column("reports", "status")
     op.drop_column("reports", "user_id")
+    op.drop_column("reports", "encryption_key_version")
     op.drop_column("users", "created_at")
     op.drop_column("users", "role")
