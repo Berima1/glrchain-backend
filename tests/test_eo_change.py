@@ -204,6 +204,53 @@ def test_unchanged_surface_returns_empty_feature_collection(tmp_path: Path) -> N
     assert candidates["features"] == []
 
 
+def test_candidate_id_changes_when_screening_configuration_changes(tmp_path: Path) -> None:
+    mining = np.s_[10:15, 10:15]
+    before_path = _reflectance_stack(
+        tmp_path / "before.tif",
+        product_id="SYNTHETIC-BEFORE",
+        acquisition_date="2026-01-01",
+    )
+    after_path = _reflectance_stack(
+        tmp_path / "after.tif",
+        product_id="SYNTHETIC-AFTER",
+        acquisition_date="2026-03-01",
+        mining_pixels=(mining,),
+    )
+
+    two_signal_result = process_pair(
+        before_path,
+        after_path,
+        tmp_path / "two-signal-result",
+        _thresholds(),
+        max_pixels=100_000,
+    )
+    three_signal_thresholds = ChangeThresholds(
+        ndvi_drop=0.25,
+        bsi_rise=0.20,
+        nbr_drop=0.25,
+        min_signals=3,
+        min_area_m2=2_000,
+    )
+    three_signal_result = process_pair(
+        before_path,
+        after_path,
+        tmp_path / "three-signal-result",
+        three_signal_thresholds,
+        max_pixels=100_000,
+    )
+    two_signal_features = json.loads(
+        (Path(two_signal_result["output_directory"]) / "change_candidates.geojson").read_text("utf-8")
+    )["features"]
+    three_signal_features = json.loads(
+        (Path(three_signal_result["output_directory"]) / "change_candidates.geojson").read_text("utf-8")
+    )["features"]
+
+    assert len(two_signal_features) == len(three_signal_features) == 1
+    assert two_signal_features[0]["geometry"] == three_signal_features[0]["geometry"]
+    assert two_signal_features[0]["id"] != three_signal_features[0]["id"]
+
+
 def test_rejects_misaligned_scenes_and_existing_output_directory(tmp_path: Path) -> None:
     before_path = _reflectance_stack(
         tmp_path / "before.tif",
