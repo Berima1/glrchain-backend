@@ -23,7 +23,8 @@ This describes the current database models and the initial target for the geospa
 |---|---|---|
 | `id` | Internal report ID | Primary key |
 | `reporter` | Submitter's profile name at submission | Not proof of legal identity |
-| `location` | Human-readable location provided in the report | Sensitive where it could reveal a person or source |
+| `location` | Encrypted location ciphertext for new reports; legacy rows remain plaintext until safely migrated | Sensitive where it could reveal a person or source; new values use Fernet key version 2 |
+| `location_encryption_key_version` | Selects location encoding/key | Version 0 means legacy plaintext; version 2 means encrypted using `REPORT_ENCRYPTION_KEY` |
 | `description` | Encrypted report text | Fernet ciphertext; API decrypts only after access control |
 | `encryption_key_version` | Selects the key used for ciphertext | Version 1 is legacy; new reports use version 2 |
 | `user_id` | Owning profile | Legacy rows may be null and need a documented data-migration decision |
