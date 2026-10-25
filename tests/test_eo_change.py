@@ -32,7 +32,7 @@ def _reflectance_stack(
     product_id: str,
     acquisition_date: str,
     transform=TRANSFORM,
-    mining_pixels: np.ndarray | None = None,
+    mining_pixels: tuple[tuple[slice, slice], ...] | None = None,
     cloud_pixels: np.ndarray | None = None,
 ) -> Path:
     """Create deterministic, non-real synthetic pixels for algorithm tests."""
@@ -44,11 +44,12 @@ def _reflectance_stack(
     scl = np.full((HEIGHT, WIDTH), 4, dtype=np.uint16)
 
     if mining_pixels is not None:
-        blue[mining_pixels] = 0.20
-        red[mining_pixels] = 0.30
-        nir[mining_pixels] = 0.25
-        swir1[mining_pixels] = 0.50
-        swir2[mining_pixels] = 0.50
+        for region in mining_pixels:
+            blue[region] = 0.20
+            red[region] = 0.30
+            nir[region] = 0.25
+            swir1[region] = 0.50
+            swir2[region] = 0.50
 
     if cloud_pixels is not None:
         scl[cloud_pixels] = 9
