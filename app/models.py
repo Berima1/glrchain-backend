@@ -62,3 +62,30 @@ class EvidenceRecord(Base):
 
     report = relationship("Report", back_populates="evidence")
     uploader = relationship("User", back_populates="uploaded_evidence")
+
+
+class AuditHead(Base):
+    """Singleton row locking and tracking the latest committed audit hash."""
+
+    __tablename__ = "audit_heads"
+
+    id = Column(Integer, primary_key=True)
+    last_hash = Column(String(64), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class AuditEvent(Base):
+    """Append-only application event. Database owners can still alter it; see audit docs."""
+
+    __tablename__ = "audit_events"
+
+    sequence = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(String(36), unique=True, nullable=False, index=True)
+    actor_user_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True, index=True)
+    action = Column(String(100), nullable=False, index=True)
+    object_type = Column(String(100), nullable=False)
+    object_id = Column(String(100), nullable=False)
+    details_json = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    previous_hash = Column(String(64), nullable=False)
+    event_hash = Column(String(64), nullable=False, unique=True, index=True)
