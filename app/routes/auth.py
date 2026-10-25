@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit import append_audit_event
 from app.database import get_db
 from app.models import User
 from app.schemas import Token, UserCreate, UserLogin, UserOut
@@ -57,6 +58,15 @@ async def register(user_input: UserCreate, db: AsyncSession = Depends(get_db)):
     )
     db.add(user)
     try:
+        await db.flush()
+        await append_audit_event(
+            db,
+            actor_user_id=user.id,
+            action="user.registered",
+            object_type="user",
+            object_id=str(user.id),
+            details={"role": "user"},
+        )
         await db.commit()
     except IntegrityError:
         await db.rollback()
@@ -85,6 +95,16 @@ async def login(user_input: UserLogin, db: AsyncSession = Depends(get_db)):
     if replacement_hash:
         user.hashed_password = replacement_hash
         await db.commit()
+
+    await append_audit_event(
+        db,
+        actor_user_id=user.id,
+        action="auth.login_succeeded",
+        object_type="user",
+        object_id=str(user.id),
+        details={},
+    )
+    await db.commit()
 
     token = create_access_token(user)
     return Token(
