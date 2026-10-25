@@ -1,20 +1,34 @@
-name: Deploy to Render
+name: Manual Render deployment (disabled for feature branches)
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
+    inputs:
+      confirm_deploy:
+        description: "Confirm deployment of the main branch to Render"
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
 
 jobs:
   deploy:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm_deploy == true }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Check out main
         uses: actions/checkout@v4
 
+      - name: Verify deployment secrets exist
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+        run: |
+          test -n "$RENDER_API_KEY" || { echo "Missing RENDER_API_KEY; deployment stopped."; exit 1; }
+          test -n "$RENDER_SERVICE_ID" || { echo "Missing RENDER_SERVICE_ID; deployment stopped."; exit 1; }
+
       - name: Deploy to Render
-        if: ${{ secrets.RENDER_API_KEY && secrets.RENDER_SERVICE_ID }}
         uses: render-examples/action-deploy@v1
         with:
           api_key: ${{ secrets.RENDER_API_KEY }}
