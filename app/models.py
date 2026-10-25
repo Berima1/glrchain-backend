@@ -34,7 +34,8 @@ class Report(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     reporter = Column(String(64), nullable=False)
-    location = Column(String(500), nullable=False)
+    location = Column(Text, nullable=False)
+    location_encryption_key_version = Column(Integer, nullable=False, default=2, server_default="0")
     description = Column(Text, nullable=False)
     # Existing records are marked version 1 by migration; new API writes use version 2.
     encryption_key_version = Column(Integer, nullable=False, default=2, server_default="1")
