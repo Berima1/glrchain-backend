@@ -25,7 +25,8 @@ from rasterio.enums import Resampling
 from rasterio.features import bounds as geometry_bounds
 from rasterio.features import geometry_mask
 from rasterio.warp import reproject, transform_geom
-from rasterio.windows import Window, bounds as window_bounds, from_bounds
+from rasterio.windows import Window, from_bounds
+from rasterio.windows import bounds as window_bounds
 from rasterio.windows import transform as window_transform
 
 from pipeline.eo_change import BAND_NAMES, STACK_SCHEMA
