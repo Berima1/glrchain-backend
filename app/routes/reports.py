@@ -65,10 +65,24 @@ def _report_response(record: Report) -> ReportOut:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="The stored report could not be decrypted. Contact the system administrator.",
         )
+    if record.location_encryption_key_version == 0:
+        # Backward compatibility for rows created before location encryption.
+        location = record.location
+    else:
+        location_cipher = _get_report_cipher(record.location_encryption_key_version)
+        try:
+            location = location_cipher.decrypt(record.location.encode("ascii")).decode("utf-8")
+        except (InvalidToken, UnicodeDecodeError, ValueError):
+            logger.exception("Unable to decrypt report location id=%s.", record.id)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="The stored report location could not be decrypted. Contact the system administrator.",
+            )
+
     return ReportOut(
         id=record.id,
         reporter=record.reporter,
-        location=record.location,
+        location=location,
         description=description,
         status=record.status,
         created_at=record.created_at,
@@ -141,10 +155,12 @@ async def create_report(
 ):
     cipher = _get_report_cipher(version=2)
     encrypted_description = cipher.encrypt(payload.description.encode("utf-8")).decode("ascii")
+    encrypted_location = cipher.encrypt(payload.location.strip().encode("utf-8")).decode("ascii")
     record = Report(
         reporter=current_user.username,
         user_id=current_user.id,
-        location=payload.location.strip(),
+        location=encrypted_location,
+        location_encryption_key_version=2,
         description=encrypted_description,
         encryption_key_version=2,
         status="submitted",
