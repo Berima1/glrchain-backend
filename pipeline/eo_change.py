@@ -99,7 +99,6 @@ def _inspect_scene(path: Path, max_pixels: int) -> SceneMetadata:
     if not path.is_file():
         raise FileNotFoundError(f"Input scene does not exist or is not a file: {path}")
 
-    digest = _sha256_file(path)
     with rasterio.open(path) as dataset:
         if dataset.count != len(BAND_NAMES):
             raise ValueError(
@@ -118,8 +117,6 @@ def _inspect_scene(path: Path, max_pixels: int) -> SceneMetadata:
             raise ValueError(
                 f"{path.name}: projected CRS linear units must be metres; found {units!r}."
             )
-        if any(abs(float(value)) == 0 for value in (dataset.transform.a, dataset.transform.e)):
-            raise ValueError(f"{path.name}: raster pixel width and height must be non-zero.")
         pixel_area_m2 = abs(
             dataset.transform.a * dataset.transform.e
             - dataset.transform.b * dataset.transform.d
@@ -158,6 +155,7 @@ def _inspect_scene(path: Path, max_pixels: int) -> SceneMetadata:
                 f"{path.name}: REFLECTANCE_QUANTIFICATION_VALUE must be finite and positive."
             )
 
+        digest = _sha256_file(path)
         offsets: dict[str, float] = {}
         for band in REFLECTANCE_BANDS:
             key = f"BOA_ADD_OFFSET_{band}"
