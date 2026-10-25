@@ -1,77 +1,80 @@
 # GLRChain Release Gates
 
-No release may be called production-ready until all gates that apply to that release are passed and evidenced. A passing API CI job is necessary but not sufficient.
+**Current disposition:** do not approve national production use based on the foundation PR alone.
 
-## Gate 0 — Source and review integrity
+Every gate must have an evidence link, the commit/environment tested, reviewer, date, result and follow-up issue if incomplete.
 
-- [ ] Branch and exact commit SHA are recorded.
-- [ ] No placeholder, demo, fake transaction, fake detection or synthetic production data path is active.
-- [ ] Draft PR diff is reviewed by an independent engineer (Codex/Claude review plus human owner review).
-- [ ] Secret scanning, dependency review, SBOM and licence review are complete.
-- [ ] Required review/branch protection is enabled for protected branches.
-- [ ] Rollback/recovery method is documented.
+## Gate 1 — Source and build integrity
 
-## Gate 1 — API and data integrity
+- [ ] Protected main branch and reviewed pull request
+- [ ] Latest required CI checks pass for the exact release commit
+- [ ] Container build succeeds and image digest is recorded
+- [ ] Dependency and container vulnerability scan reviewed
+- [ ] No credentials, private keys, personal data or real evidence in repository history
+- [ ] Reproducible build/deployment inputs recorded
 
-- [ ] CI compiles the package, runs tests against PostgreSQL/PostGIS, applies migrations from an empty database and from a representative upgrade fixture, and builds the container.
-- [ ] Tests cover authentication, authorisation, account provisioning, data persistence, encryption/decryption, evidence type/size rejection, evidence digest checks, audit chain verification/tamper detection, and failure handling.
-- [ ] Race/concurrency tests cover audit append serialization, duplicate profile provisioning, idempotency and retries.
-- [ ] Legacy report encryption and ownership mapping are tested against a backed-up, representative copy of existing records.
-- [ ] All roles are tested for permitted and denied operations.
-- [ ] No admin account can be created by public registration or self-promotion.
-- [ ] External failure never returns a false success receipt.
+## Gate 2 — Identity and access control
 
-## Gate 2 — Google Cloud and identity
+- [ ] Authentication and token lifecycle reviewed
+- [ ] Role assignment is server-controlled
+- [ ] Negative tests cover anonymous access, privilege escalation and cross-user access
+- [ ] Admin account provisioning, recovery, MFA and offboarding documented
+- [ ] Rate limits, abuse controls and safe error responses tested
+- [ ] Security-relevant actions are durably audited
 
-- [ ] Separate project/environment approved for GLRChain; budget/quota alerts configured.
-- [ ] Cloud Run API and migration job use separate identities.
-- [ ] Cloud SQL connection path, PostGIS extension, backups and point-in-time recovery are configured and tested.
-- [ ] Runtime database user is least-privilege; migration user is separately controlled.
-- [ ] Private GCS bucket has public access prevention/uniform bucket-level access and approved retention/versioning settings.
-- [ ] Bucket access is scoped to the runtime service identity; no service-account JSON key is committed or embedded in images.
-- [ ] Secret Manager references use approved, pinned versions with least-privilege access.
-- [ ] Firebase Authentication is configured, tokens are verified server-side, sign-in providers are approved, and privileged identities have stronger controls.
-- [ ] Production configuration fails at startup when essential settings are missing or invalid.
-- [ ] Monitoring, alerting, structured logs, service health and budget alerts are live.
-- [ ] HTTPS, abuse/rate controls, CORS/app-client policy and denial of unauthenticated sensitive routes are reviewed.
+## Gate 3 — Data and cryptography
 
-## Gate 3 — Operations and privacy
+- [ ] Production managed database configured with TLS and least privilege
+- [ ] Migrations reviewed and tested against a clean database
+- [ ] Backups enabled and restore drill passed
+- [ ] Persistent encryption/signing keys stored in secret management
+- [ ] Key recovery and rotation tested
+- [ ] Retention, legal hold, export and deletion policies approved
+- [ ] Logs exclude secrets, passwords, tokens and sensitive report content
 
-- [ ] Data owner, legal basis, access policies, privacy notice, retention schedule and disclosure rules are approved.
-- [ ] Backup restore is demonstrated with a timed recovery record.
-- [ ] Incident response, account offboarding, key rotation, data correction, legal hold and deletion procedures are exercised.
-- [ ] Evidence chain-of-custody export is reproducible; files can be retrieved and hashes re-verified.
-- [ ] Audit events are exported to an independently controlled destination and verified.
-- [ ] Load, availability and failure-recovery tests meet an approved service-level objective.
-- [ ] Penetration test and threat-model review findings are resolved or formally accepted by the responsible authority.
+## Gate 4 — Evidence storage and chain of custody
 
-## Gate 4 — Satellite intelligence (before any detection claims)
+- [ ] Private object storage and least-privilege IAM verified
+- [ ] Real upload/download test passed using synthetic evidence
+- [ ] SHA-256 digest verified against stored bytes
+- [ ] Owner-scoped access and denied cross-user access tested against real storage
+- [ ] Object versioning/retention and audit logs reviewed
+- [ ] Evidence provenance and reviewer history recorded
+- [ ] Restore/recovery procedure tested
 
-- [ ] Live data acquisition uses authorised source products and recorded product IDs/checksums.
-- [ ] Geospatial alignment, CRS, quality/cloud/water/sensor checks and edge conditions are tested.
-- [ ] Algorithm/model, parameters, processing environment and version are pinned.
-- [ ] A Ghana-relevant labelled dataset is separated into development and evaluation sets without leakage.
-- [ ] Precision/recall, false-positive/false-negative rates, confidence calibration, regional/seasonal limitations and review workload are reported.
-- [ ] Human review and correction flows are implemented; model output is never automatically treated as proof of a criminal offence.
-- [ ] Reprocessing a recorded input produces a reproducible output digest or explains permitted nondeterminism.
+## Gate 5 — Geospatial monitoring (required before enabling alerts)
 
-## Gate 5 — Blockchain anchoring (before any anchor claims)
+- [ ] Source data permissions, product IDs and provenance recorded
+- [ ] Ingestion, retries, deduplication and quality checks implemented
+- [ ] CRS, co-registration, geometry and area calculations validated
+- [ ] Reference dataset and independent geographic/temporal evaluation completed
+- [ ] Precision, recall, false-positive/negative rates and calibration documented
+- [ ] Seasonal and non-mining change causes assessed
+- [ ] Analyst review, uncertainty labels and correction workflow tested
+- [ ] No unreviewed candidate is represented as a legal finding
 
-- [ ] Network ownership, governance, validator policy, key custody and recovery arrangements are approved.
-- [ ] No private key is committed or held in application source; use a managed signing arrangement.
-- [ ] Transaction input, chain ID, contract address/code, receipt status, block number, transaction hash and finality rule are verified.
-- [ ] Failure/retry/idempotency and duplicate-anchoring tests pass.
-- [ ] Only a hash/approved metadata is anchored; private report content is not published on-chain.
-- [ ] An independent verifier can recalculate the digest and confirm the real chain receipt.
+## Gate 6 — Blockchain anchoring (required before claiming anchoring)
 
-## Release decision record
+- [ ] Target network, governance and threat model approved
+- [ ] Contract reviewed and deployed to the intended network
+- [ ] Chain ID, contract address, deployment transaction and bytecode verified
+- [ ] Signer keys isolated and access-controlled
+- [ ] Retry/idempotency, confirmation/finality and failure recovery tested
+- [ ] Evidence digest/manifest is canonical and independently verifiable
+- [ ] Real transaction is independently checked from a separate client
+- [ ] No mock transaction or fabricated success response remains in operational paths
 
-For each release, record: reviewer names/roles, commit SHA, CI run URL, migration result, staging environment, security findings, unresolved risks, approval authority, release timestamp, deployment revision, and rollback target.
+## Gate 7 — Operations and governance
 
+- [ ] Named service owner and incident lead
+- [ ] Monitoring, alerting, log retention and escalation tested
+- [ ] Capacity/load and availability tests completed
+- [ ] Incident response, disclosure, rollback and disaster recovery rehearsed
+- [ ] Privacy, legal basis, data sharing and retention reviewed by appropriate Ghanaian stakeholders
+- [ ] User roles, case review procedures and audit access approved
+- [ ] Training and operational handover completed
+- [ ] Project owner explicitly approves the release
 
-## Additional release gates for the current cloud path
+## Current release decision
 
-- [ ] The first administrator is bound to an approved, verified Firebase UID using the one-time audited bootstrap; public account provisioning remains unable to grant roles.
-- [ ] Exact approved browser frontend origins are set in GLRCHAIN_ALLOWED_ORIGINS; allowed preflight passes and an unapproved origin does not receive CORS permission.
-- [ ] If legacy records are retained, the staged process in LEGACY_DATA_MIGRATION.md has been rehearsed on a restored backup, including legacy encryption, user mapping, evidence byte hashes, and the known historical audit gap.
-- [ ] A baseline/import event and a signed source manifest are included for legacy data; no historical audit actions are invented.
+Until these gates are completed and evidenced, classify the system as **foundation / staging candidate**. A passing API test suite or HTTP 200 response is not sufficient for production approval.
