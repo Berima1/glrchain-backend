@@ -37,13 +37,13 @@ def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _stored_description(report_id: int) -> str:
+def _stored_description(report_id: int) -> tuple[str, int]:
     url = os.environ["DATABASE_URL"]
     if url.startswith("sqlite+aiosqlite:///"):
         path = url.split("sqlite+aiosqlite:///", 1)[1]
         with sqlite3.connect(path) as connection:
             row = connection.execute(
-                "SELECT description FROM reports WHERE id = ?", (report_id,)
+                "SELECT description, encryption_key_version FROM reports WHERE id = ?", (report_id,)
             ).fetchone()
     else:
         import psycopg2
@@ -51,10 +51,10 @@ def _stored_description(report_id: int) -> str:
         sync_url = url.replace("postgresql+asyncpg://", "postgresql://", 1)
         with psycopg2.connect(sync_url) as connection:
             with connection.cursor() as cursor:
-                cursor.execute("SELECT description FROM reports WHERE id = %s", (report_id,))
+                cursor.execute("SELECT description, encryption_key_version FROM reports WHERE id = %s", (report_id,))
                 row = cursor.fetchone()
     assert row is not None
-    return row[0]
+    return row[0], row[1]
 
 
 def test_health_endpoints(client: TestClient) -> None:
@@ -105,7 +105,8 @@ def test_reports_are_persisted_encrypted_and_owner_scoped(client: TestClient) ->
     assert report["description"] == original_description
     assert report["status"] == "submitted"
 
-    stored = _stored_description(report["id"])
+    stored, key_version = _stored_description(report["id"])
+    assert key_version == 2
     assert original_description not in stored
     decrypted = Fernet(os.environ["REPORT_ENCRYPTION_KEY"].encode("ascii")).decrypt(
         stored.encode("ascii")
