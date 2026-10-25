@@ -33,7 +33,7 @@ The application creates ordered audit events in the same transaction as relevant
 
 The chain is **tamper-evident, not immutable**. A sufficiently privileged database operator could rewrite all events and the head. Independent assurance therefore requires exporting audit events to a separately administered logging/retention system and regularly verifying them there as well. The application endpoint `GET /admin/audit/verify` only verifies the chain currently present in the database.
 
-## Geospatial processing flow (not yet implemented)
+## Geospatial processing flow (offline screening implemented; cloud integration pending)
 
 1. Record the satellite source/product ID, acquisition time, scene footprint, processing level, projection, source checksum, cloud/quality flags, and licence/usage metadata.
 2. Harmonise and align time-separated observations; reject misaligned or low-quality inputs.
@@ -43,7 +43,7 @@ The chain is **tamper-evident, not immutable**. A sufficiently privileged databa
 6. Route candidates to an authorised human review queue. Record reviewer, outcome, reason, timestamps, evidence, and any escalation separately from model output.
 7. Validate against a Ghana-relevant labelled dataset and publish false-positive/false-negative rates, coverage gaps, and model version before operational use.
 
-Current repository stubs for NBR/SAR/U-Net and fake score/transaction endpoints were removed from active code paths. There is no live satellite detection or blockchain anchoring endpoint in this foundation release.
+The offline Sentinel-2 L2A processing stage is implemented in `pipeline/eo_change.py`: it validates a documented six-band, co-registered pair; applies the product's radiometric offsets and SCL quality masks; computes NDVI/BSI/NBR changes; screens pixels using explicitly provided thresholds; polygonises connected components; and writes GeoJSON plus hashed run metadata. It is tested with deterministic synthetic raster fixtures, not yet validated on real Ghana imagery. The stack-construction/catalog-acquisition step, durable worker orchestration, PostgreSQL/PostGIS candidate ingestion, Ghana-labeled model evaluation, and review workflow remain unimplemented. Fake score/transaction endpoints and inactive NBR/SAR/U-Net stubs were removed from active code paths; no blockchain anchoring endpoint is released.
 
 ## Deployment topology
 
