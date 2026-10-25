@@ -35,6 +35,8 @@ class Report(Base):
     reporter = Column(String(64), nullable=False)
     location = Column(String(500), nullable=False)
     description = Column(Text, nullable=False)
+    # Existing records are marked version 1 by migration; new API writes use version 2.
+    encryption_key_version = Column(Integer, nullable=False, default=2, server_default="1")
     user_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True, index=True)
     status = Column(String(32), nullable=False, default="submitted", server_default="submitted")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
