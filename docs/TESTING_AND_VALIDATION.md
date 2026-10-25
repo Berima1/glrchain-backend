@@ -27,7 +27,7 @@ The initial API foundation achieved a successful CI run at commit `eb4862dad3e09
 - Public registration/provisioning always receives the normal user role.
 - Local-mode login issues a short-lived token; unauthenticated routes cannot read protected data.
 - Firebase-mode token verification maps a verified UID to a profile; password login is rejected in Firebase mode.
-- Report descriptions persist as ciphertext and decrypt correctly on authorised reads.
+- Report descriptions and new report locations persist as ciphertext and decrypt correctly on authorised reads; legacy location version 0 remains backward-compatible.
 - Owner scoping denies other users access.
 - Evidence uploads fail closed without bucket config and enforce the accepted signatures/size limit.
 - Successful upload/download records digest metadata and refuses modified content.
