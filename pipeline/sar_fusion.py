@@ -1,1 +1,0 @@
-print('SAR fusion stub')
