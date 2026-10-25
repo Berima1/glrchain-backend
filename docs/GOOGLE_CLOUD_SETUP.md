@@ -94,6 +94,7 @@ The workflow `.github/workflows/deploy_cloud_run.yml` is manual and must run fro
 - `GCP_MIGRATION_DB_SECRET_REF`
 - `GCP_SECRET_KEY_SECRET_REF`
 - `GCP_REPORT_ENCRYPTION_SECRET_REF`
+- `GCP_ALLOWED_ORIGINS` (comma-separated exact HTTPS origins approved for the browser frontend, with no paths)
 
 Add a protected GitHub Environment named `production` with required approvers. Do not copy actual secrets into repository files, workflow source, screenshots, issues or chat. The workflow should fail closed if any required variable is missing.
 
