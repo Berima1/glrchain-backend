@@ -1,8 +1,8 @@
 import os
 import sqlite3
-from pathlib import Path
 from uuid import uuid4
 
+import pytest
 from cryptography.fernet import Fernet
 
 os.environ.setdefault("GLRCHAIN_CREATE_SCHEMA_ON_STARTUP", "true")
@@ -13,6 +13,12 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./glrchain_test.db")
 from fastapi.testclient import TestClient
 
 from app.main import app
+
+
+@pytest.fixture(scope="module")
+def client():
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 def _create_account(client: TestClient) -> tuple[str, str]:
@@ -43,7 +49,8 @@ def _stored_description(report_id: int) -> tuple[str, int]:
         path = url.split("sqlite+aiosqlite:///", 1)[1]
         with sqlite3.connect(path) as connection:
             row = connection.execute(
-                "SELECT description, encryption_key_version FROM reports WHERE id = ?", (report_id,)
+                "SELECT description, encryption_key_version FROM reports WHERE id = ?",
+                (report_id,),
             ).fetchone()
     else:
         import psycopg2
@@ -51,7 +58,10 @@ def _stored_description(report_id: int) -> tuple[str, int]:
         sync_url = url.replace("postgresql+asyncpg://", "postgresql://", 1)
         with psycopg2.connect(sync_url) as connection:
             with connection.cursor() as cursor:
-                cursor.execute("SELECT description, encryption_key_version FROM reports WHERE id = %s", (report_id,))
+                cursor.execute(
+                    "SELECT description, encryption_key_version FROM reports WHERE id = %s",
+                    (report_id,),
+                )
                 row = cursor.fetchone()
     assert row is not None
     return row[0], row[1]
@@ -118,9 +128,7 @@ def test_reports_are_persisted_encrypted_and_owner_scoped(client: TestClient) ->
     assert read_back.json()["description"] == original_description
 
     _other_username, other_token = _create_account(client)
-    denied = client.get(
-        f"/reports/{report['id']}", headers=_headers(other_token)
-    )
+    denied = client.get(f"/reports/{report['id']}", headers=_headers(other_token))
     assert denied.status_code == 404
 
 
@@ -130,7 +138,7 @@ def test_fake_intelligence_endpoint_is_not_exposed(client: TestClient) -> None:
 
 
 def test_evidence_upload_fails_closed_without_private_bucket(
-    client: TestClient, monkeypatch
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _username, token = _create_account(client)
     monkeypatch.delenv("GLRCHAIN_EVIDENCE_BUCKET", raising=False)
