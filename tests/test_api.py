@@ -182,7 +182,7 @@ def test_private_evidence_upload_and_download_verify_sha256(
     assert report_response.status_code == 201, report_response.text
     report_id = report_response.json()["id"]
 
-    evidence_bytes = b"\\xff\\xd8\\xff" + b"glrchain-image-test-bytes"
+    evidence_bytes = bytes([0xFF, 0xD8, 0xFF]) + b"glrchain-image-test-bytes"
     captured: dict[str, object] = {}
 
     def fake_upload(bucket, object_name, data, content_type, metadata):
