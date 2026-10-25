@@ -22,7 +22,9 @@ from typing import Any
 import numpy as np
 import rasterio
 from rasterio.enums import Resampling
-from rasterio.warp import reproject
+from rasterio.features import bounds as geometry_bounds, geometry_mask
+from rasterio.warp import reproject, transform_geom
+from rasterio.windows import Window, from_bounds, transform as window_transform
 
 from pipeline.eo_change import BAND_NAMES, STACK_SCHEMA
 
@@ -145,7 +147,46 @@ def _read_product_metadata(metadata_path: Path) -> dict[str, Any]:
     }
 
 
-def _validate_reference(path: Path) -> dict[str, Any]:
+def _read_aoi(path: Path, target_crs: rasterio.crs.CRS) -> tuple[list[dict[str, Any]], str]:
+    if not path.is_file():
+        raise FileNotFoundError(f"AOI GeoJSON does not exist: {path}")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("AOI must be a readable GeoJSON file.") from exc
+
+    if payload.get("type") == "FeatureCollection":
+        geometries = [
+            feature.get("geometry")
+            for feature in payload.get("features", [])
+            if feature.get("geometry") is not None
+        ]
+    elif payload.get("type") == "Feature":
+        geometries = [payload.get("geometry")]
+    elif payload.get("type") in {"Polygon", "MultiPolygon"}:
+        geometries = [payload]
+    else:
+        raise ValueError("AOI GeoJSON must be a Polygon, MultiPolygon, Feature, or FeatureCollection.")
+    geometries = [geometry for geometry in geometries if geometry]
+    if not geometries or any(
+        geometry.get("type") not in {"Polygon", "MultiPolygon"} for geometry in geometries
+    ):
+        raise ValueError("AOI GeoJSON must contain at least one Polygon or MultiPolygon geometry.")
+
+    # RFC 7946 GeoJSON coordinates are WGS84 longitude/latitude.
+    projected = [
+        transform_geom("EPSG:4326", target_crs, geometry, precision=-1)
+        for geometry in geometries
+    ]
+    return projected, _sha256_file(path)
+
+
+def _validate_reference(
+    path: Path,
+    *,
+    aoi_geojson: Path | None,
+    max_pixels: int,
+) -> dict[str, Any]:
     if not path.is_file():
         raise FileNotFoundError(f"Input band file does not exist: {path}")
     with rasterio.open(path) as dataset:
@@ -161,12 +202,67 @@ def _validate_reference(path: Path) -> dict[str, Any]:
             or abs(dataset.transform.d) > 1e-7
         ):
             raise ValueError("B11 reference grid must be north-up with 20 m pixels.")
+        source_transform = dataset.transform
+        source_width = dataset.width
+        source_height = dataset.height
+        aoi_geometries = None
+        aoi_sha256 = None
+
+        if aoi_geojson is not None:
+            aoi_geometries, aoi_sha256 = _read_aoi(aoi_geojson, dataset.crs)
+            bounds = [geometry_bounds(geometry) for geometry in aoi_geometries]
+            min_x = min(item[0] for item in bounds)
+            min_y = min(item[1] for item in bounds)
+            max_x = max(item[2] for item in bounds)
+            max_y = max(item[3] for item in bounds)
+            fractional = from_bounds(min_x, min_y, max_x, max_y, source_transform)
+            col_start = max(0, math.floor(fractional.col_off))
+            row_start = max(0, math.floor(fractional.row_off))
+            col_stop = min(source_width, math.ceil(fractional.col_off + fractional.width))
+            row_stop = min(source_height, math.ceil(fractional.row_off + fractional.height))
+            if col_stop <= col_start or row_stop <= row_start:
+                raise ValueError("AOI GeoJSON does not overlap the B11 reference scene.")
+            target_width = col_stop - col_start
+            target_height = row_stop - row_start
+            target_window = Window(col_start, row_start, target_width, target_height)
+            target_transform = window_transform(target_window, source_transform)
+        else:
+            target_width = source_width
+            target_height = source_height
+            target_window = Window(0, 0, target_width, target_height)
+            target_transform = source_transform
+
+        pixel_count = target_width * target_height
+        if pixel_count > max_pixels:
+            hint = " Provide --aoi-geojson or split the area into smaller tiles." if aoi_geojson is None else " Split the AOI into smaller tiles."
+            raise ValueError(
+                f"Target grid has {pixel_count:,} pixels, exceeding the configured limit "
+                f"{max_pixels:,}.{hint}"
+            )
+        inside_aoi = None
+        if aoi_geometries is not None:
+            inside_aoi = geometry_mask(
+                aoi_geometries,
+                out_shape=(target_height, target_width),
+                transform=target_transform,
+                invert=True,
+                all_touched=False,
+            )
+            if not np.any(inside_aoi):
+                raise ValueError("AOI does not cover any pixel centres on the target grid.")
+
         return {
-            "width": dataset.width,
-            "height": dataset.height,
+            "width": target_width,
+            "height": target_height,
             "crs": dataset.crs,
-            "transform": dataset.transform,
+            "transform": target_transform,
             "profile": dataset.profile.copy(),
+            "source_width": source_width,
+            "source_height": source_height,
+            "source_transform": source_transform,
+            "window": target_window,
+            "inside_aoi": inside_aoi,
+            "aoi_sha256": aoi_sha256,
         }
 
 
@@ -175,6 +271,7 @@ def _resample_band(
     reference: dict[str, Any],
     resampling: Resampling,
     band_name: str,
+    inside_aoi: np.ndarray | None = None,
 ) -> np.ndarray:
     if not source_path.is_file():
         raise FileNotFoundError(f"{band_name} input band does not exist: {source_path}")
@@ -203,9 +300,11 @@ def _resample_band(
             resampling=resampling,
             init_dest_nodata=True,
         )
+        if inside_aoi is not None:
+            destination[~inside_aoi] = 0
         if not np.any(np.isfinite(destination) & (destination != 0)):
             raise ValueError(
-                f"{band_name} band produced no valid pixels on the B11 target grid."
+                f"{band_name} band produced no valid pixels on the target grid/AOI."
             )
         return destination
 
@@ -228,6 +327,8 @@ def prepare_s2_stack(
     b12_path: str | Path,
     scl_path: str | Path,
     output_path: str | Path,
+    aoi_geojson: str | Path | None = None,
+    max_pixels: int = 4_000_000,
 ) -> dict[str, Any]:
     """Prepare the processor's six-band 20 m stack from one supplied L2A granule."""
     source_paths = {
@@ -248,8 +349,13 @@ def prepare_s2_stack(
     if final_path in source_paths.values() or final_path == metadata_path:
         raise ValueError("Output path must not overwrite an input file.")
 
+    if max_pixels < 1:
+        raise ValueError("max_pixels must be a positive integer.")
+    aoi_path = Path(aoi_geojson).expanduser().resolve() if aoi_geojson is not None else None
     metadata = _read_product_metadata(metadata_path)
-    reference = _validate_reference(source_paths["B11"])
+    reference = _validate_reference(
+        source_paths["B11"], aoi_geojson=aoi_path, max_pixels=max_pixels
+    )
     target_pixels = reference["width"] * reference["height"]
     if target_pixels < 1:
         raise ValueError("B11 target grid is empty.")
@@ -267,7 +373,11 @@ def prepare_s2_stack(
     for band_name in BAND_NAMES:
         method = Resampling.nearest if band_name == "SCL" else Resampling.average
         resampled[band_name] = _resample_band(
-            source_paths[band_name], reference, method, band_name
+            source_paths[band_name],
+            reference,
+            method,
+            band_name,
+            inside_aoi=reference["inside_aoi"],
         )
         input_hashes[band_name] = _sha256_file(source_paths[band_name])
 
@@ -302,6 +412,7 @@ def prepare_s2_stack(
                 "PROCESSING_BASELINE": metadata["processing_baseline"],
                 "REFLECTANCE_QUANTIFICATION_VALUE": str(metadata["quantification_value"]),
                 "SOURCE_METADATA_SHA256": metadata["metadata_sha256"],
+                "GRID_PIXEL_LIMIT": str(max_pixels),
                 "RESAMPLING_METHODS": json.dumps(
                     resampling_methods, sort_keys=True, separators=(",", ":")
                 ),
@@ -309,6 +420,8 @@ def prepare_s2_stack(
                     input_hashes, sort_keys=True, separators=(",", ":")
                 ),
             }
+            if reference["aoi_sha256"]:
+                tags["AOI_GEOJSON_SHA256"] = reference["aoi_sha256"]
             tags.update(
                 {
                     f"BOA_ADD_OFFSET_{band}": str(offset)
@@ -343,6 +456,10 @@ def prepare_s2_stack(
                 "height": reference["height"],
                 "transform": list(reference["transform"]),
                 "resolution_m": TARGET_RESOLUTION_M,
+                "source_reference_width": reference["source_width"],
+                "source_reference_height": reference["source_height"],
+                "aoi_geojson_sha256": reference["aoi_sha256"],
+                "max_pixels": max_pixels,
             },
             "output": {"filename": final_path.name, "sha256": stack_sha256},
             "warning": (
@@ -390,6 +507,17 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--b12", required=True, type=Path)
     parser.add_argument("--scl", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path, help="New output GeoTIFF path.")
+    parser.add_argument(
+        "--aoi-geojson",
+        type=Path,
+        help="Optional RFC 7946 WGS84 polygon GeoJSON to clip the stack to an area of interest.",
+    )
+    parser.add_argument(
+        "--max-pixels",
+        type=int,
+        default=4_000_000,
+        help="Maximum output pixels (default 4,000,000); large full-scene inputs must be clipped.",
+    )
     return parser
 
 
@@ -406,6 +534,8 @@ def main() -> int:
             b12_path=args.b12,
             scl_path=args.scl,
             output_path=args.output,
+            aoi_geojson=args.aoi_geojson,
+            max_pixels=args.max_pixels,
         )
     except (FileNotFoundError, FileExistsError, OSError, RuntimeError, ValueError) as exc:
         parser.exit(2, f"error: {exc}\n")
