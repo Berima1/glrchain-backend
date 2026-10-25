@@ -55,3 +55,16 @@ Inspected the live GitHub contents of `Berima1/glrchain-backend` and found broke
 - Added deterministic synthetic-raster tests for radiometric offset handling, clouds, candidate polygon output, area filtering, CRS conversion, no-change scenes, grid mismatch, acquisition ordering, and invalid thresholds.
 - Added the satellite pipeline method/metadata/outputs/limitations document and updated architecture/README/testing docs.
 - Important limitation: the stack preparation tool, official Copernicus catalog/search/download, durable Cloud Run worker, database candidate ingestion, Ghana-specific threshold calibration, accuracy report, and human review workflow remain outstanding. These outputs are surface-change candidates only, not determinations of galamsey or illegality. Tests use synthetic pixels and do not establish real-world detection accuracy.
+
+
+## Documentation baseline — 2026-10-25
+
+Added/updated the following review documents on the foundation branch:
+
+- `PROJECT_STATUS_AND_LIMITATIONS.md`
+- `GOOGLE_CLOUD_DEPLOYMENT.md`
+- `SATELLITE_DETECTION_DESIGN.md`
+- `TESTING_AND_RELEASE.md`
+- `DECISION_LOG.md`
+
+These documents intentionally distinguish code that exists from behaviour verified by automated tests, resources that require external provisioning, and capabilities that are not yet operational. The GCP guide is a runbook, not evidence that cloud resources have already been provisioned. The satellite document is a target design, not a deployed detection algorithm.
