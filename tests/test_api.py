@@ -13,6 +13,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./glrchain_test.db")
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.database import database_url_from_env, normalize_database_url
 
 
 @pytest.fixture(scope="module")
@@ -150,3 +151,11 @@ def test_evidence_upload_fails_closed_without_private_bucket(
     )
     assert response.status_code == 503
     assert "not configured" in response.json()["detail"]
+
+
+def test_database_url_configuration_fails_closed_in_production() -> None:
+    with pytest.raises(RuntimeError, match="DATABASE_URL is required"):
+        database_url_from_env({"APP_ENV": "production"})
+    assert database_url_from_env({"APP_ENV": "test"}).startswith("sqlite+aiosqlite:///")
+    assert normalize_database_url("postgres://user:pass@host/db").startswith("postgresql+asyncpg://")
+    assert normalize_database_url("postgresql://user:pass@host/db").startswith("postgresql+asyncpg://")
