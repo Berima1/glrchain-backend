@@ -39,3 +39,11 @@ Inspected the live GitHub contents of `Berima1/glrchain-backend` and found broke
 - No real blockchain contract deployment/transaction anchoring is implemented.
 - Further tests are required for final commit, including audit chain concurrency/tamper test, Firebase mode, fresh/upgrade migrations, and Docker build.
 - Review the complete PR diff; do not merge while checks are pending/failing and do not deploy until all release gates that apply are approved.
+
+
+### Additional hardening after the initial audit/Firebase pass
+
+- New report locations are encrypted alongside descriptions. Migration `0005_location_encryption` marks old plaintext locations as version 0 and widens the database field to safely hold ciphertext. The downgrade is intentionally blocked because shrinking back to the old width could truncate encrypted values.
+- Added a strict CORS origin allowlist; production startup and the Cloud Run release workflow require approved frontend origins.
+- Changed initial administrator bootstrap to require a pre-approved, verified Firebase UID and to create a Firebase-backed admin profile, not a local-password account that production Firebase mode would reject.
+- Current CI must be rechecked at the newest commit to verify these later code and test changes; earlier green results do not automatically apply to newer commits.
