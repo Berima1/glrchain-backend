@@ -380,10 +380,19 @@ def process_pair(
         if label_id > label_count or not accepted_labels[label_id]:
             continue
         area_m2 = float(pixel_counts[label_id] * pixel_area_m2)
+        geometry_sha256 = hashlib.sha256(
+            json.dumps(geometry, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        candidate_identity = {
+            "before_product_id": before.source_product_id,
+            "after_product_id": after.source_product_id,
+            "algorithm_version": ALGORITHM_VERSION,
+            "thresholds": asdict(thresholds),
+            "geometry_sha256": geometry_sha256,
+        }
         candidate_id = hashlib.sha256(
-            (
-                f"{before.source_product_id}|{after.source_product_id}|"
-                f"{ALGORITHM_VERSION}|{label_id}"
+            json.dumps(
+                candidate_identity, sort_keys=True, separators=(",", ":")
             ).encode("utf-8")
         ).hexdigest()[:24]
         wgs84_geometry = transform_geom(
