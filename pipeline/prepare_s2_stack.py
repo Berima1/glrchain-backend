@@ -22,9 +22,11 @@ from typing import Any
 import numpy as np
 import rasterio
 from rasterio.enums import Resampling
-from rasterio.features import bounds as geometry_bounds, geometry_mask
+from rasterio.features import bounds as geometry_bounds
+from rasterio.features import geometry_mask
 from rasterio.warp import reproject, transform_geom
-from rasterio.windows import Window, from_bounds, transform as window_transform
+from rasterio.windows import Window, from_bounds
+from rasterio.windows import transform as window_transform
 
 from pipeline.eo_change import BAND_NAMES, STACK_SCHEMA
 
