@@ -68,3 +68,9 @@ Added/updated the following review documents on the foundation branch:
 - `DECISION_LOG.md`
 
 These documents intentionally distinguish code that exists from behaviour verified by automated tests, resources that require external provisioning, and capabilities that are not yet operational. The GCP guide is a runbook, not evidence that cloud resources have already been provisioned. The satellite document is a target design, not a deployed detection algorithm.
+
+## Documentation completeness update — 2026-10-25
+
+The documentation set was expanded to include the central index, explicit release gates, threat model, evidence chain-of-custody requirements, data dictionary, and operations runbook. The PR description links to the review documents. The complete set is indexed in [docs/README.md](README.md).
+
+These are design and governance artefacts, not evidence that GCP resources, the satellite processing pipeline, or blockchain anchoring are deployed. The latest CI run must be checked against the final head SHA before any merge; a queued/pending run is not a pass.
