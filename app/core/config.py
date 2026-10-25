@@ -1,15 +1,11 @@
-"""Environment configuration helpers for GLRChain.
-
-Secrets are deliberately not generated at runtime: replacing a key on restart can
-make previously encrypted report descriptions unreadable.
-"""
+"""Validated environment configuration for GLRChain."""
 import os
 
-from app.database import normalize_database_url
+from app.database import database_url_from_env
 
-DATABASE_URL = normalize_database_url(
-    os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./glrchain.db")
-)
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+DATABASE_URL = database_url_from_env()
 SECRET_KEY = os.getenv("SECRET_KEY")
 REPORT_ENCRYPTION_KEY = os.getenv("REPORT_ENCRYPTION_KEY")
+LEGACY_REPORT_ENCRYPTION_KEY = os.getenv("LEGACY_REPORT_ENCRYPTION_KEY")
 EVIDENCE_BUCKET = os.getenv("GLRCHAIN_EVIDENCE_BUCKET")
