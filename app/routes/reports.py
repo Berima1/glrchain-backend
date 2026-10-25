@@ -24,24 +24,38 @@ MAX_EVIDENCE_BYTES = 20 * 1024 * 1024
 PRIVILEGED_ROLES = {"admin", "validator"}
 
 
-def _get_report_cipher() -> Fernet:
-    key = os.getenv("REPORT_ENCRYPTION_KEY")
+def _get_report_cipher(version: int = 2) -> Fernet:
+    if version == 1:
+        # Historical deployments encrypted report descriptions with SECRET_KEY.
+        # Set LEGACY_REPORT_ENCRYPTION_KEY explicitly if that historical value differs.
+        key = os.getenv("LEGACY_REPORT_ENCRYPTION_KEY") or os.getenv("SECRET_KEY")
+        key_label = "legacy report encryption key"
+    elif version == 2:
+        key = os.getenv("REPORT_ENCRYPTION_KEY")
+        key_label = "REPORT_ENCRYPTION_KEY"
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="The stored report uses an unsupported encryption-key version.",
+        )
+
     if not key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Report encryption is not configured; the report was not stored.",
+            detail=f"The {key_label} is not configured; the report was not returned or stored.",
         )
     try:
         return Fernet(key.encode("ascii"))
     except (ValueError, TypeError, UnicodeEncodeError):
-        logger.error("REPORT_ENCRYPTION_KEY is invalid.")
+        logger.error("%s is invalid.", key_label)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Report encryption is misconfigured; the report was not stored.",
+            detail=f"The {key_label} is misconfigured; the report was not returned or stored.",
         )
 
 
-def _report_response(record: Report, cipher: Fernet) -> ReportOut:
+def _report_response(record: Report) -> ReportOut:
+    cipher = _get_report_cipher(record.encryption_key_version)
     try:
         description = cipher.decrypt(record.description.encode("ascii")).decode("utf-8")
     except (InvalidToken, UnicodeDecodeError, ValueError):
@@ -124,13 +138,14 @@ async def create_report(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cipher = _get_report_cipher()
+    cipher = _get_report_cipher(version=2)
     encrypted_description = cipher.encrypt(payload.description.encode("utf-8")).decode("ascii")
     record = Report(
         reporter=current_user.username,
         user_id=current_user.id,
         location=payload.location.strip(),
         description=encrypted_description,
+        encryption_key_version=2,
         status="submitted",
     )
     db.add(record)
@@ -144,7 +159,7 @@ async def create_report(
             detail="The report could not be stored. No report receipt was issued.",
         )
     await db.refresh(record)
-    return _report_response(record, cipher)
+    return _report_response(record)
 
 
 @router.get("/reports", response_model=list[ReportOut])
@@ -154,12 +169,11 @@ async def list_reports(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cipher = _get_report_cipher()
     query = select(Report).order_by(Report.created_at.desc(), Report.id.desc())
     if current_user.role not in PRIVILEGED_ROLES:
         query = query.where(Report.user_id == current_user.id)
     records = (await db.scalars(query.offset(offset).limit(limit))).all()
-    return [_report_response(record, cipher) for record in records]
+    return [_report_response(record) for record in records]
 
 
 @router.get("/reports/{report_id}", response_model=ReportOut)
@@ -169,7 +183,7 @@ async def read_report(
     current_user: User = Depends(get_current_user),
 ):
     record = await _load_accessible_report(report_id, current_user, db)
-    return _report_response(record, _get_report_cipher())
+    return _report_response(record)
 
 
 @router.post("/evidence", response_model=EvidenceOut, status_code=status.HTTP_201_CREATED)
