@@ -1,0 +1,155 @@
+name: Deploy GLRChain API to Google Cloud Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_deploy:
+        description: "Confirm deploying the approved main-branch commit to the production Cloud Run service"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: glrchain-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm_production_deploy == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      GCP_ARTIFACT_REGISTRY_REPOSITORY: ${{ vars.GCP_ARTIFACT_REGISTRY_REPOSITORY }}
+      GCP_CLOUD_RUN_SERVICE: ${{ vars.GCP_CLOUD_RUN_SERVICE }}
+      GCP_CLOUD_RUN_MIGRATION_JOB: ${{ vars.GCP_CLOUD_RUN_MIGRATION_JOB }}
+      GCP_CLOUD_SQL_INSTANCE: ${{ vars.GCP_CLOUD_SQL_INSTANCE }}
+      GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+      GCP_MIGRATION_SERVICE_ACCOUNT: ${{ vars.GCP_MIGRATION_SERVICE_ACCOUNT }}
+      GCP_EVIDENCE_BUCKET: ${{ vars.GCP_EVIDENCE_BUCKET }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_DEPLOYER_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+      GCP_RUNTIME_DB_SECRET_REF: ${{ vars.GCP_RUNTIME_DB_SECRET_REF }}
+      GCP_MIGRATION_DB_SECRET_REF: ${{ vars.GCP_MIGRATION_DB_SECRET_REF }}
+      GCP_SECRET_KEY_SECRET_REF: ${{ vars.GCP_SECRET_KEY_SECRET_REF }}
+      GCP_REPORT_ENCRYPTION_SECRET_REF: ${{ vars.GCP_REPORT_ENCRYPTION_SECRET_REF }}
+      GCP_LEGACY_REPORT_ENCRYPTION_SECRET_REF: ${{ vars.GCP_LEGACY_REPORT_ENCRYPTION_SECRET_REF }}
+
+    steps:
+      - name: Check out the approved commit
+        uses: actions/checkout@v7
+
+      - name: Validate required deployment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in \
+            GCP_PROJECT_ID GCP_REGION GCP_ARTIFACT_REGISTRY_REPOSITORY \
+            GCP_CLOUD_RUN_SERVICE GCP_CLOUD_RUN_MIGRATION_JOB GCP_CLOUD_SQL_INSTANCE \
+            GCP_RUNTIME_SERVICE_ACCOUNT GCP_MIGRATION_SERVICE_ACCOUNT GCP_EVIDENCE_BUCKET \
+            GCP_WORKLOAD_IDENTITY_PROVIDER GCP_DEPLOYER_SERVICE_ACCOUNT \
+            GCP_RUNTIME_DB_SECRET_REF GCP_MIGRATION_DB_SECRET_REF \
+            GCP_SECRET_KEY_SECRET_REF GCP_REPORT_ENCRYPTION_SECRET_REF; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing required GitHub Environment/Repository Variable: $name"
+              exit 1
+            fi
+          done
+          if [[ ! "$GCP_WORKLOAD_IDENTITY_PROVIDER" =~ ^projects/[0-9]+/locations/global/workloadIdentityPools/[^/]+/providers/[^/]+$ ]]; then
+            echo "::error::GCP_WORKLOAD_IDENTITY_PROVIDER must be a full Workload Identity Provider resource name."
+            exit 1
+          fi
+          if [[ "$GITHUB_SHA" == "" ]]; then
+            echo "::error::No source commit SHA available."
+            exit 1
+          fi
+
+      - name: Authenticate via GitHub OIDC
+        id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Install Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Build and push immutable commit-tagged image
+        shell: bash
+        run: |
+          set -euo pipefail
+          REGISTRY_HOST="$GCP_REGION-docker.pkg.dev"
+          IMAGE="$REGISTRY_HOST/$GCP_PROJECT_ID/$GCP_ARTIFACT_REGISTRY_REPOSITORY/glrchain-api:$GITHUB_SHA"
+          gcloud auth configure-docker "$REGISTRY_HOST" --quiet
+          docker build --pull --tag "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Run database migrations with the dedicated migration identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$GCP_CLOUD_RUN_MIGRATION_JOB" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --image "$IMAGE" \
+            --service-account "$GCP_MIGRATION_SERVICE_ACCOUNT" \
+            --add-cloudsql-instances "$GCP_CLOUD_SQL_INSTANCE" \
+            --command alembic \
+            --args upgrade,head \
+            --set-env-vars "APP_ENV=production" \
+            --set-secrets "DATABASE_URL=$GCP_MIGRATION_DB_SECRET_REF" \
+            --task-timeout 900s \
+            --max-retries 1
+          gcloud run jobs execute "$GCP_CLOUD_RUN_MIGRATION_JOB" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --wait
+
+      - name: Deploy API service after migrations succeed
+        shell: bash
+        run: |
+          set -euo pipefail
+          SECRET_REFS="DATABASE_URL=$GCP_RUNTIME_DB_SECRET_REF,SECRET_KEY=$GCP_SECRET_KEY_SECRET_REF,REPORT_ENCRYPTION_KEY=$GCP_REPORT_ENCRYPTION_SECRET_REF"
+          if [[ -n "$GCP_LEGACY_REPORT_ENCRYPTION_SECRET_REF" ]]; then
+            SECRET_REFS="$SECRET_REFS,LEGACY_REPORT_ENCRYPTION_KEY=$GCP_LEGACY_REPORT_ENCRYPTION_SECRET_REF"
+          fi
+
+          gcloud run deploy "$GCP_CLOUD_RUN_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --platform managed \
+            --image "$IMAGE" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --add-cloudsql-instances "$GCP_CLOUD_SQL_INSTANCE" \
+            --port 8000 \
+            --set-env-vars "APP_ENV=production,GLRCHAIN_AUTH_PROVIDER=firebase,FIREBASE_PROJECT_ID=$GCP_PROJECT_ID,GLRCHAIN_EVIDENCE_BUCKET=$GCP_EVIDENCE_BUCKET" \
+            --set-secrets "$SECRET_REFS" \
+            --concurrency 20 \
+            --timeout 300 \
+            --allow-unauthenticated
+
+      - name: Verify service health endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE_URL="$(gcloud run services describe "$GCP_CLOUD_RUN_SERVICE" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --format='value(status.url)')"
+          test -n "$SERVICE_URL"
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 "$SERVICE_URL/health/live"
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 "$SERVICE_URL/health/ready"
+          echo
+          echo "Release commit: $GITHUB_SHA"
+          echo "Cloud Run service health checks passed for $SERVICE_URL"
