@@ -1,66 +1,54 @@
 # GLRChain Data Dictionary
 
-This describes the current database models and the initial target for the geospatial extension. Column details must be kept in sync with `app/models.py` and Alembic migrations.
+**Status:** conceptual dictionary for the foundation. Confirm exact column names/types against the SQLAlchemy models and Alembic migrations for the release commit before treating this as a schema contract.
 
-## Current tables
+## User / principal
 
-### `users`
+Represents an account that can authenticate to the API.
 
-| Field | Purpose | Notes |
-|---|---|---|
-| `id` | Internal profile ID | Primary key |
-| `username` | Unique GLRChain display/login name | Do not treat as legal identity proof |
-| `hashed_password` | Local-mode password hash or Firebase-managed marker | Never return in API responses; Firebase mode disables local password login |
-| `firebase_uid` | Firebase Authentication UID | Nullable for legacy/local accounts; unique when present |
-| `role` | Authorisation role | Public provision/register paths must not set privileged roles |
-| `created_at` | Creation timestamp | Database-generated |
+- **ID:** stable internal identifier.
+- **Username or login identifier:** unique account identifier; avoid treating it as a verified legal identity.
+- **Password hash:** one-way password verifier; plaintext passwords must never be stored.
+- **Role:** server-controlled authorization role. Public registration must not permit self-assignment of administrative roles.
+- **Created timestamp:** server-side account creation time.
+- **Status fields (if implemented):** account enabled/disabled and security lifecycle metadata.
 
-**Sensitivity:** account/identity metadata. Role changes require a controlled, separately audited administrative procedure. The current first-admin bootstrap command is intended only for initial controlled setup; routine role administration still requires a governed process.
+## Report / case submission
 
-### `reports`
+Represents a user-submitted report. It is not automatically a legally verified finding.
 
-| Field | Purpose | Notes |
-|---|---|---|
-| `id` | Internal report ID | Primary key |
-| `reporter` | Submitter's profile name at submission | Not proof of legal identity |
-| `location` | Encrypted location ciphertext for new reports; legacy rows remain plaintext until safely migrated | Sensitive where it could reveal a person or source; new values use Fernet key version 2 |
-| `location_encryption_key_version` | Selects location encoding/key | Version 0 means legacy plaintext; version 2 means encrypted using `REPORT_ENCRYPTION_KEY` |
-| `description` | Encrypted report text | Fernet ciphertext; API decrypts only after access control |
-| `encryption_key_version` | Selects the key used for ciphertext | Version 1 is legacy; new reports use version 2 |
-| `user_id` | Owning profile | Legacy rows may be null and need a documented data-migration decision |
-| `status` | Workflow state | Current initial state is `submitted`; formal transition rules are still needed |
-| `created_at` | Creation timestamp | Database-generated |
+- **Report ID:** server-generated stable identifier.
+- **Reporter/user ID:** authenticated owner reference.
+- **Location:** user-provided location description or coordinates; coordinate reference system must be explicit when coordinates are stored.
+- **Description:** sensitive report text; the foundation encrypts this field before persistence.
+- **Created/updated timestamps:** server-controlled UTC timestamps.
+- **Status:** workflow state, if implemented; transitions must be authorized and audited.
+- **Evidence references:** links to evidence metadata, not embedded raw files.
+- **Review outcome:** should include reviewer, timestamp, decision and rationale when review workflow is implemented.
 
-### `evidence_records`
+## Evidence metadata
 
-| Field | Purpose | Notes |
-|---|---|---|
-| `id` | UUID for evidence metadata | Not a public storage URL |
-| `report_id` | Associated report | Foreign key |
-| `object_name` | Private Cloud Storage object name | Never make the bucket public |
-| `sha256` | Digest of the stored bytes | Recomputed on download; digest match does not prove source authenticity |
-| `size_bytes` | Stored object size | API limit is currently 20 MiB per upload |
-| `content_type` | File type inferred from signature | Accepted signatures currently JPEG, PNG, PDF, and MP4 |
-| `original_filename` | Sanitised display filename | Not used as object path |
-| `uploaded_by` | Uploader profile ID | Foreign key |
-| `created_at` | Creation timestamp | Database-generated |
+Represents a submitted file or derived artefact. The object bytes live in private object storage.
 
-### `audit_heads` and `audit_events`
+- **Evidence ID:** server-generated identifier.
+- **Report ID:** parent report/case reference.
+- **Owner/submitting principal:** authenticated account reference.
+- **Object identifier/version:** private storage reference; never a public URL.
+- **SHA-256 digest:** server-computed digest of received bytes.
+- **Media type and byte size:** validated server-side.
+- **Original filename:** metadata only; must not determine a storage path.
+- **Received timestamp:** server-generated UTC time.
+- **Capture timestamp/source:** separate from receipt time and explicitly marked as claimed or verified.
+- **Provenance/processing metadata:** source references, parent evidence IDs, pipeline/model version and output digest where applicable.
 
-- `audit_heads`: one row (`id=1`) holds the last event hash. Appends lock this row on PostgreSQL.
-- `audit_events`: sequential ID, unique event UUID, actor (nullable for future system events), action, object type/ID, canonicalised details JSON, timestamp, previous hash, and event hash.
+## Audit event (required design)
 
-Audit details must not contain passwords, tokens, secret keys, raw report descriptions, or unnecessary personal information. The chain is designed to make unauthorised modification detectable, not to withstand a database superuser who rewrites all events and the head.
+A durable append-oriented record for security-relevant actions, including login/security events, report/evidence create/read/update/delete, authorization failures, privileged actions, migration/deployment changes, review decisions and key operational events. Each event should record actor, action, target ID, server timestamp, outcome, correlation ID and minimal safe context. Do not store secrets, passwords, tokens, or evidence body content in audit events.
 
-## Future geospatial tables (not yet implemented)
+## Satellite candidate (future capability)
 
-Do not infer that these tables exist. Proposed entities are:
+A candidate observation, not a legal conclusion. Expected fields include AOI/geometry and CRS, acquisition timestamps, source product IDs, processing/model version, feature/score explanation, uncertainty, evidence references, reviewer decision and rationale.
 
-- **Parcel/land unit:** source authority, source reference, geometry and CRS, version/effective date, public/private classification, provenance, and verification status.
-- **Resource licence/permit:** issuing authority, permit identifier, holder reference, geometry or authorised area, commodity/activity, start/end dates, conditions, verification status, source document digest.
-- **Observation/acquisition:** provider, product ID, acquisition time, footprint, projection, processing level, cloud/quality metadata, input checksum.
-- **Change candidate:** geometry, baseline/target acquisition IDs, algorithm/model version, features and quality flags, measured score with documented interpretation, output digest, lifecycle status.
-- **Review decision:** reviewer identity, decision, reasons, timestamps, evidence links, escalation disposition and any corrections.
-- **Audit export receipt:** destination, export range, digest/signature, verification result and export timestamp.
+## Anchoring record (future capability)
 
-Each future entity needs a retention class, access matrix, validation rules, and migration before being implemented.
+A record of a real, independently verifiable transaction only. Expected fields include chain ID, contract address, canonical digest or batch root, transaction hash, block number, confirmation/finality status and verification timestamp. Never store fake transaction IDs or claim success before the transaction is confirmed and independently checked.
